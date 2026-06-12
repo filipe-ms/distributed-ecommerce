@@ -1,0 +1,28 @@
+# Go build artifacts
+*.test
+*.out
+/bin/
+/dist/
+/coverage.out
+
+# Service local data (each container mounts its own volume in Docker)
+*.db
+*.db-journal
+products.json
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+*.swp
+
+# Local env overrides
+.env.local
+.env.*.local
+
+# Planning artifact (kept locally for reference, not part of the deliverable)
+PLAN.md
+
+# Generated TLS material — recreate via certs/generate.sh
+/certs/cert.pem
+/certs/key.pem
