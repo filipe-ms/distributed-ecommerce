@@ -1,8 +1,8 @@
 // Command gateway runs the API gateway. It is the only service exposed
 // outside the docker-compose network: clients hit the gateway, which
 // forwards requests to the users, products and orders services over HTTPS
-// while preserving the bearer token. Subsequent commits add a heartbeat
-// loop, the product replica coordinator and the monitoring dashboard.
+// while preserving the bearer token. The gateway also runs a heartbeat
+// loop that flips routes to 503 when a downstream service stops responding.
 package main
 
 import (
@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/filipe-ms/distributed-ecommerce/internal/gateway"
@@ -25,25 +26,39 @@ func main() {
 	keyFilePath := environmentValueOrDefault("TLS_KEY_PATH", "/certs/key.pem")
 
 	configuration := gateway.GatewayConfiguration{
-		UsersServiceURL:  environmentValueOrDefault("USERS_SERVICE_URL", "https://users:5001"),
-		OrdersServiceURL: environmentValueOrDefault("ORDERS_SERVICE_URL", "https://orders:5003"),
+		UsersServiceURL:           environmentValueOrDefault("USERS_SERVICE_URL", "https://users:5001"),
+		OrdersServiceURL:          environmentValueOrDefault("ORDERS_SERVICE_URL", "https://orders:5003"),
+		ProductsPrimaryServiceURL: environmentValueOrDefault("PRODUCTS_PRIMARY_URL", "https://products-primary:5002"),
+		ProductsReplicaServiceURL: environmentValueOrDefault("PRODUCTS_REPLICA_URL", "https://products-replica:5012"),
 	}
 
-	gatewayServer := gateway.NewServer(configuration)
+	gatewayServer := gateway.NewServer(configuration, logger)
 	router := gatewayServer.BuildRouter()
 
-	shutdownContext, cancelShutdownContext := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancelShutdownContext()
+	rootContext, cancelRootContext := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancelRootContext()
+
+	var heartbeatWaitGroup sync.WaitGroup
+	heartbeatWaitGroup.Add(1)
+	go func() {
+		defer heartbeatWaitGroup.Done()
+		gatewayServer.RunHeartbeat(rootContext)
+	}()
 
 	logger.Info("gateway starting",
 		"listen", listenAddress,
 		"users_url", configuration.UsersServiceURL,
-		"orders_url", configuration.OrdersServiceURL)
+		"orders_url", configuration.OrdersServiceURL,
+		"products_primary_url", configuration.ProductsPrimaryServiceURL,
+		"products_replica_url", configuration.ProductsReplicaServiceURL)
 
-	if serveError := tlsserver.ListenAndServe(shutdownContext, listenAddress, router, certificateFilePath, keyFilePath); serveError != nil {
+	if serveError := tlsserver.ListenAndServe(rootContext, listenAddress, router, certificateFilePath, keyFilePath); serveError != nil {
 		logger.Error("gateway exited with error", "error", serveError)
+		cancelRootContext()
+		heartbeatWaitGroup.Wait()
 		os.Exit(1)
 	}
+	heartbeatWaitGroup.Wait()
 	logger.Info("gateway shut down cleanly")
 }
 
