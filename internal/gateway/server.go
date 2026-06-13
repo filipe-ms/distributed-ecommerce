@@ -29,12 +29,13 @@ type GatewayConfiguration struct {
 // tasks share. It is the only place outside of main.go that knows about the
 // HTTP client used for downstream calls.
 type Server struct {
-	configuration     GatewayConfiguration
-	internalClient    *http.Client
-	proxyClient       *ProxyClient
-	heartbeatRegistry *HeartbeatRegistry
-	eventRing         *EventRing
-	logger            *slog.Logger
+	configuration         GatewayConfiguration
+	internalClient        *http.Client
+	proxyClient           *ProxyClient
+	heartbeatRegistry     *HeartbeatRegistry
+	eventRing             *EventRing
+	productReplicaManager *ProductReplicaManager
+	logger                *slog.Logger
 }
 
 // NewServer builds a Server with sensible defaults. The HTTP client used for
@@ -65,12 +66,21 @@ func NewServer(configuration GatewayConfiguration, logger *slog.Logger) *Server 
 	}
 
 	return &Server{
-		configuration:     configuration,
-		internalClient:    internalClient,
-		proxyClient:       NewProxyClient(internalClient, heartbeatRegistry),
-		heartbeatRegistry: heartbeatRegistry,
-		eventRing:         eventRing,
-		logger:            logger,
+		configuration:         configuration,
+		internalClient:        internalClient,
+		proxyClient:           NewProxyClient(internalClient, heartbeatRegistry),
+		heartbeatRegistry:     heartbeatRegistry,
+		eventRing:             eventRing,
+		productReplicaManager: NewProductReplicaManager(
+			configuration.ProductsPrimaryServiceURL,
+			configuration.ProductsReplicaServiceURL,
+			"products-primary",
+			"products-replica",
+			internalClient,
+			heartbeatRegistry,
+			logger,
+		),
+		logger: logger,
 	}
 }
 
@@ -101,8 +111,22 @@ func (server *Server) BuildRouter() http.Handler {
 
 	router.Mount("/api/users", buildPrefixHandler(server.proxyClient.HandlerFor(usersRoute)))
 	router.Mount("/api/orders", buildPrefixHandler(server.proxyClient.HandlerFor(ordersRoute)))
+	router.Mount("/api/products", server.buildProductRoutes())
 
 	return router
+}
+
+// buildProductRoutes returns a handler that dispatches by HTTP method:
+// GET requests round-robin between the two replicas while non-GET requests
+// fan out to both for strong-consistency writes.
+func (server *Server) buildProductRoutes() http.Handler {
+	return http.HandlerFunc(func(responseWriter http.ResponseWriter, incomingRequest *http.Request) {
+		if incomingRequest.Method == http.MethodGet {
+			server.productReplicaManager.HandleRead(responseWriter, incomingRequest)
+			return
+		}
+		server.productReplicaManager.HandleWrite(responseWriter, incomingRequest)
+	})
 }
 
 // buildPrefixHandler wraps a single handler so that chi's Mount accepts it.
