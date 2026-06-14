@@ -19,6 +19,17 @@
 COMPOSE       := docker compose
 GATEWAY_URL   := https://localhost:8443
 
+# On macOS, Docker Desktop installs its credential helpers under
+# /Applications/Docker.app/Contents/Resources/bin but does not always add
+# that directory to the user's shell PATH. When the helper is missing,
+# `docker pull` fails with "docker-credential-desktop: executable file not
+# found in $PATH" even for anonymous pulls. Prepend it transparently when
+# the directory exists so `make up` works without any shell setup.
+DOCKER_DESKTOP_BIN := /Applications/Docker.app/Contents/Resources/bin
+ifneq (,$(wildcard $(DOCKER_DESKTOP_BIN)))
+  export PATH := $(DOCKER_DESKTOP_BIN):$(PATH)
+endif
+
 help:
 	@echo "Targets:"
 	@echo "  up           (default) generate certs and env file, then docker compose up --build"
