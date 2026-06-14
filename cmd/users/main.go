@@ -1,7 +1,9 @@
 // Command users runs the user microservice. It listens on HTTPS, persists
 // data in SQLite, signs JWTs with the shared JWT_SECRET, and on first start
 // seeds a default administrator account so the assignment grader can log in
-// immediately.
+// immediately. Toggling the kill switch via POST /admin/toggle triggers a
+// graceful self-shutdown so the docker-compose restart policy brings the
+// container back up automatically.
 package main
 
 import (
@@ -18,9 +20,14 @@ import (
 	"github.com/filipe-ms/distributed-ecommerce/internal/users"
 )
 
+const responseFlushGracePeriod = 500 * time.Millisecond
+
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
+
+	rootContext, cancelRootContext := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancelRootContext()
 
 	listenAddress := environmentValueOrDefault("LISTEN_ADDRESS", ":5001")
 	databasePath := environmentValueOrDefault("DATABASE_PATH", "/data/users.db")
@@ -53,17 +60,20 @@ func main() {
 	}
 
 	serviceKillSwitch := killswitch.New()
-	router := users.BuildRouter(userStore, serviceKillSwitch, []byte(signingSecretValue), tokenLifetime)
+	serviceKillSwitch.SetAfterEngageCallback(func() {
+		time.Sleep(responseFlushGracePeriod)
+		logger.Info("kill switch engaged via /admin/toggle, beginning graceful shutdown")
+		cancelRootContext()
+	})
 
-	shutdownContext, cancelShutdownContext := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancelShutdownContext()
+	router := users.BuildRouter(userStore, serviceKillSwitch, []byte(signingSecretValue), tokenLifetime)
 
 	logger.Info("user service starting",
 		"listen", listenAddress,
 		"database", databasePath,
 		"token_lifetime_minutes", tokenLifetimeMinutes)
 
-	if serveError := tlsserver.ListenAndServe(shutdownContext, listenAddress, router, certificateFilePath, keyFilePath); serveError != nil {
+	if serveError := tlsserver.ListenAndServe(rootContext, listenAddress, router, certificateFilePath, keyFilePath); serveError != nil {
 		logger.Error("user service exited with error", "error", serveError)
 		os.Exit(1)
 	}

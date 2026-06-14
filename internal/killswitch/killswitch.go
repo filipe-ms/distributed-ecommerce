@@ -21,12 +21,23 @@ const togglePath = "/admin/toggle"
 // from the request path; the mutating operation (Toggle) only happens from
 // the dashboard, so contention is essentially zero.
 type Switch struct {
-	isCurrentlyKilled atomic.Bool
+	isCurrentlyKilled        atomic.Bool
+	afterEngageCallback      func()
 }
 
 // New constructs an unset Switch (the service starts in a healthy state).
 func New() *Switch {
 	return &Switch{}
+}
+
+// SetAfterEngageCallback registers a function that runs in its own goroutine
+// after the kill switch is toggled into the killed state. Production builds
+// use this to schedule a clean process shutdown (after the response has
+// been flushed back through the gateway), so the docker-compose restart
+// policy brings the container back up automatically. Tests can leave it
+// nil and just inspect the in-process flag.
+func (killSwitch *Switch) SetAfterEngageCallback(callback func()) {
+	killSwitch.afterEngageCallback = callback
 }
 
 // IsKilled reports the current state. Useful in tests and in the dashboard
@@ -61,8 +72,17 @@ func (killSwitch *Switch) Middleware(nextHandler http.Handler) http.Handler {
 
 // ToggleHandler is the HTTP handler for POST /admin/toggle. It flips the
 // switch and returns the new state as JSON so the dashboard can update its
-// per-service indicator without polling.
+// per-service indicator without polling. When the toggle moves the service
+// into the killed state and an after-engage callback is registered, the
+// callback is launched in its own goroutine so the response is fully sent
+// back to the client before the process begins shutting down.
 func (killSwitch *Switch) ToggleHandler(responseWriter http.ResponseWriter, _ *http.Request) {
 	newKilledState := killSwitch.Toggle()
 	httpjson.WriteJSON(responseWriter, http.StatusOK, map[string]bool{"killed": newKilledState})
+	if newKilledState && killSwitch.afterEngageCallback != nil {
+		if flusher, ok := responseWriter.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		go killSwitch.afterEngageCallback()
+	}
 }

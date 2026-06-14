@@ -1,7 +1,9 @@
 // Command products runs the catalogue microservice. The same binary is
 // launched twice in docker-compose (products-primary and products-replica),
 // each with its own STORAGE_PATH, so the gateway can write to both replicas
-// for strong consistency.
+// for strong consistency. Toggling the kill switch via POST /admin/toggle
+// triggers a graceful self-shutdown so the docker-compose restart policy
+// brings the container back up automatically.
 package main
 
 import (
@@ -10,15 +12,21 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/filipe-ms/distributed-ecommerce/internal/killswitch"
 	"github.com/filipe-ms/distributed-ecommerce/internal/products"
 	"github.com/filipe-ms/distributed-ecommerce/internal/tlsserver"
 )
 
+const responseFlushGracePeriod = 500 * time.Millisecond
+
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
+
+	rootContext, cancelRootContext := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancelRootContext()
 
 	listenAddress := environmentValueOrDefault("LISTEN_ADDRESS", ":5002")
 	storageFilePath := environmentValueOrDefault("STORAGE_PATH", "/data/products.json")
@@ -38,17 +46,21 @@ func main() {
 	}
 
 	serviceKillSwitch := killswitch.New()
-	router := products.BuildRouter(productStore, serviceKillSwitch, []byte(signingSecretValue))
+	serviceKillSwitch.SetAfterEngageCallback(func() {
+		time.Sleep(responseFlushGracePeriod)
+		logger.Info("kill switch engaged via /admin/toggle, beginning graceful shutdown",
+			"replica", replicaName)
+		cancelRootContext()
+	})
 
-	shutdownContext, cancelShutdownContext := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer cancelShutdownContext()
+	router := products.BuildRouter(productStore, serviceKillSwitch, []byte(signingSecretValue))
 
 	logger.Info("product service starting",
 		"listen", listenAddress,
 		"storage", storageFilePath,
 		"replica", replicaName)
 
-	if serveError := tlsserver.ListenAndServe(shutdownContext, listenAddress, router, certificateFilePath, keyFilePath); serveError != nil {
+	if serveError := tlsserver.ListenAndServe(rootContext, listenAddress, router, certificateFilePath, keyFilePath); serveError != nil {
 		logger.Error("product service exited with error", "error", serveError)
 		os.Exit(1)
 	}
