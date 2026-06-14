@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/filipe-ms/distributed-ecommerce/internal/authentication"
 
@@ -171,23 +172,5 @@ func isUniqueConstraintViolation(databaseError error) bool {
 		return false
 	}
 	message := databaseError.Error()
-	return containsAll(message, "UNIQUE", "constraint")
-}
-
-func containsAll(message string, needles ...string) bool {
-	for _, needle := range needles {
-		if !contains(message, needle) {
-			return false
-		}
-	}
-	return true
-}
-
-func contains(haystack, needle string) bool {
-	for index := 0; index+len(needle) <= len(haystack); index++ {
-		if haystack[index:index+len(needle)] == needle {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(message, "UNIQUE") && strings.Contains(message, "constraint")
 }
