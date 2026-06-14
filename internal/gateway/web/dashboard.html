@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Distributed E-Commerce — Dashboard</title>
+  <style>
+    :root {
+      --color-background: #0f172a;
+      --color-surface: #1e293b;
+      --color-surface-elevated: #273449;
+      --color-text: #e2e8f0;
+      --color-text-muted: #94a3b8;
+      --color-up: #22c55e;
+      --color-down: #ef4444;
+      --color-warning: #f59e0b;
+      --color-accent: #38bdf8;
+      --radius: 10px;
+      --font-stack: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--color-background);
+      color: var(--color-text);
+      font-family: var(--font-stack);
+      font-size: 14px;
+      min-height: 100vh;
+    }
+    main {
+      max-width: 880px;
+      margin: 0 auto;
+      padding: 32px 16px 64px;
+    }
+    h1 {
+      font-size: 18px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--color-accent);
+      margin-bottom: 24px;
+    }
+    section {
+      background: var(--color-surface);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      margin-bottom: 24px;
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+    section h2 {
+      margin: 0 0 16px;
+      font-size: 13px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--color-text-muted);
+    }
+    table.services {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    table.services td {
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      vertical-align: middle;
+    }
+    table.services tr:last-child td { border-bottom: none; }
+    .status-indicator {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-right: 12px;
+      vertical-align: middle;
+      box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.05);
+    }
+    .status-up      { background: var(--color-up); }
+    .status-down    { background: var(--color-down); }
+    .status-warning { background: var(--color-warning); }
+    .service-name { font-weight: 600; }
+    .service-url  { color: var(--color-text-muted); font-size: 12px; }
+    .toggle-button {
+      background: var(--color-surface-elevated);
+      color: var(--color-text);
+      border: 1px solid transparent;
+      padding: 6px 14px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-family: var(--font-stack);
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      transition: background 120ms ease, border-color 120ms ease;
+    }
+    .toggle-button.kill   { color: var(--color-down); border-color: rgba(239, 68, 68, 0.3); }
+    .toggle-button.revive { color: var(--color-up);   border-color: rgba(34, 197, 94, 0.3); }
+    .toggle-button:hover  { background: rgba(255, 255, 255, 0.06); }
+    .events-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      max-height: 320px;
+      overflow-y: auto;
+    }
+    .events-list li {
+      display: grid;
+      grid-template-columns: 200px 180px 1fr;
+      gap: 12px;
+      padding: 8px 0;
+      font-size: 12px;
+      color: var(--color-text-muted);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    }
+    .events-list li:last-child { border-bottom: none; }
+    .events-list .event-kind-down      { color: var(--color-down); }
+    .events-list .event-kind-recovered { color: var(--color-up); }
+    .footer-hint {
+      text-align: center;
+      color: var(--color-text-muted);
+      font-size: 11px;
+      margin-top: 24px;
+    }
+    .errors-banner {
+      background: rgba(239, 68, 68, 0.12);
+      color: var(--color-down);
+      padding: 8px 12px;
+      border-radius: 6px;
+      margin-bottom: 16px;
+      display: none;
+    }
+    .errors-banner.visible { display: block; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Distributed E-Commerce — Status Dashboard</h1>
+
+    <div id="errors-banner" class="errors-banner"></div>
+
+    <section>
+      <h2>Services</h2>
+      <table class="services">
+        <tbody id="services-table-body">
+          <tr><td>Loading…</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Recent events</h2>
+      <ul id="events-list" class="events-list">
+        <li><span>—</span><span>—</span><span>No events yet</span></li>
+      </ul>
+    </section>
+
+    <p class="footer-hint">Auto-refreshes every 2 seconds. Click a button to simulate or recover from a service outage.</p>
+  </main>
+
+  <script>
+    const statusEndpoint = "/administration/status";
+    const togglePathPrefix = "/administration/toggle/";
+    const refreshIntervalMilliseconds = 2000;
+
+    function clearErrorBanner() {
+      const banner = document.getElementById("errors-banner");
+      banner.classList.remove("visible");
+      banner.textContent = "";
+    }
+
+    function showErrorBanner(message) {
+      const banner = document.getElementById("errors-banner");
+      banner.textContent = message;
+      banner.classList.add("visible");
+    }
+
+    function statusIndicatorClass(serviceStatus) {
+      if (!serviceStatus.available) return "status-down";
+      if (serviceStatus.consecutiveFailures > 0) return "status-warning";
+      return "status-up";
+    }
+
+    function buildServiceRow(serviceStatus) {
+      const row = document.createElement("tr");
+
+      const statusCell = document.createElement("td");
+      const indicator = document.createElement("span");
+      indicator.className = "status-indicator " + statusIndicatorClass(serviceStatus);
+      statusCell.appendChild(indicator);
+      const labelWrapper = document.createElement("span");
+      labelWrapper.innerHTML =
+        '<span class="service-name">' + serviceStatus.name + '</span><br />' +
+        '<span class="service-url">' + serviceStatus.baseUrl + '</span>';
+      statusCell.appendChild(labelWrapper);
+      row.appendChild(statusCell);
+
+      const stateCell = document.createElement("td");
+      stateCell.textContent = serviceStatus.available ? "UP" : "DOWN";
+      stateCell.style.color = serviceStatus.available ? "var(--color-up)" : "var(--color-down)";
+      stateCell.style.textAlign = "right";
+      stateCell.style.fontWeight = "600";
+      stateCell.style.letterSpacing = "0.06em";
+      row.appendChild(stateCell);
+
+      const buttonCell = document.createElement("td");
+      buttonCell.style.textAlign = "right";
+      buttonCell.style.width = "120px";
+      const toggleButton = document.createElement("button");
+      toggleButton.textContent = serviceStatus.available ? "Kill" : "Revive";
+      toggleButton.className = "toggle-button " + (serviceStatus.available ? "kill" : "revive");
+      toggleButton.addEventListener("click", function () {
+        toggleService(serviceStatus.name);
+      });
+      buttonCell.appendChild(toggleButton);
+      row.appendChild(buttonCell);
+
+      return row;
+    }
+
+    function buildEventListItem(eventEntry) {
+      const listItem = document.createElement("li");
+      const formattedTimestamp = new Date(eventEntry.at).toLocaleString();
+      listItem.innerHTML =
+        '<span>' + formattedTimestamp + '</span>' +
+        '<span>' + eventEntry.service + '</span>' +
+        '<span class="event-kind-' + eventEntry.kind.toLowerCase() + '">' + eventEntry.kind + '</span>';
+      return listItem;
+    }
+
+    function renderStatus(payload) {
+      const tableBody = document.getElementById("services-table-body");
+      tableBody.innerHTML = "";
+      if (!payload.services || payload.services.length === 0) {
+        const emptyRow = document.createElement("tr");
+        emptyRow.innerHTML = "<td>No services registered</td>";
+        tableBody.appendChild(emptyRow);
+      } else {
+        payload.services.forEach(function (serviceStatus) {
+          tableBody.appendChild(buildServiceRow(serviceStatus));
+        });
+      }
+
+      const eventsList = document.getElementById("events-list");
+      eventsList.innerHTML = "";
+      if (!payload.events || payload.events.length === 0) {
+        const emptyItem = document.createElement("li");
+        emptyItem.innerHTML = "<span>—</span><span>—</span><span>No events yet</span>";
+        eventsList.appendChild(emptyItem);
+      } else {
+        payload.events.forEach(function (eventEntry) {
+          eventsList.appendChild(buildEventListItem(eventEntry));
+        });
+      }
+    }
+
+    async function refreshStatus() {
+      try {
+        const fetchResponse = await fetch(statusEndpoint, { cache: "no-store" });
+        if (!fetchResponse.ok) {
+          showErrorBanner("Status endpoint returned " + fetchResponse.status);
+          return;
+        }
+        clearErrorBanner();
+        const payload = await fetchResponse.json();
+        renderStatus(payload);
+      } catch (fetchError) {
+        showErrorBanner("Could not reach the gateway: " + fetchError.message);
+      }
+    }
+
+    async function toggleService(serviceName) {
+      try {
+        const togglePostResponse = await fetch(togglePathPrefix + encodeURIComponent(serviceName), {
+          method: "POST",
+        });
+        if (!togglePostResponse.ok) {
+          showErrorBanner("Toggle for " + serviceName + " returned " + togglePostResponse.status);
+        }
+        await refreshStatus();
+      } catch (toggleError) {
+        showErrorBanner("Toggle failed: " + toggleError.message);
+      }
+    }
+
+    refreshStatus();
+    setInterval(refreshStatus, refreshIntervalMilliseconds);
+  </script>
+</body>
+</html>

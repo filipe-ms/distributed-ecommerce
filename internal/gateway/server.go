@@ -106,6 +106,14 @@ func (server *Server) BuildRouter() http.Handler {
 
 	router.Get("/health", writeGatewayHealthHandler())
 
+	// Monitoring dashboard (HTML page) plus its JSON status endpoint and the
+	// per-service toggle proxy. These are deliberately under a separate path
+	// prefix from the /api/* proxy routes so they cannot conflict with
+	// downstream service URLs.
+	router.Get("/dashboard", server.writeDashboardHTMLHandler())
+	router.Get("/administration/status", server.writeDashboardStatusHandler())
+	router.Post("/administration/toggle/{serviceName}", server.writeAdminToggleProxyHandler())
+
 	usersRoute := ServiceRoute{Name: "users", BaseURL: server.configuration.UsersServiceURL}
 	ordersRoute := ServiceRoute{Name: "orders", BaseURL: server.configuration.OrdersServiceURL}
 
