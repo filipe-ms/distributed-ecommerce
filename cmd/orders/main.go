@@ -1,9 +1,5 @@
-// Command orders runs the order microservice. It listens on HTTPS, persists
-// orders in SQLite, and trusts the JWT supplied by the caller to identify
-// the user — orders are never created on behalf of an arbitrary user id
-// supplied in the request body. Toggling the kill switch via /admin/toggle
-// triggers a graceful self-shutdown so the docker-compose restart policy
-// brings the container back up automatically.
+// Ponto de entrada do serviço de pedidos. Abre o SQLite e expõe
+// a API HTTPS por trás do gateway.
 package main
 
 import (

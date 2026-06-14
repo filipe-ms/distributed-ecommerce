@@ -1,11 +1,11 @@
-// Package orders implements the order service: it stores orders in SQLite
-// and exposes two endpoints — one to place an order (the user is taken from
-// the JWT, never from the request body) and one to list a user's orders.
+// Package orders implementa o serviço de pedidos: guarda os pedidos
+// no SQLite e expõe duas rotas — uma pra criar pedido (o usuário vem
+// do JWT, nunca do corpo da request) e outra pra listar pedidos de
+// um usuário.
 //
-// The service deliberately does not call the product service to validate
-// productId values. Doing so would couple the two services' availability:
-// a brief product-service outage would block order creation. The trade-off
-// is documented in the project report.
+// O serviço de propósito não chama o de produtos pra validar o
+// productId. Se chamasse, uma queda do produtos derrubaria a criação
+// de pedidos junto. Esse trade-off tá no relatório.
 package orders
 
 import (
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS orders (
 CREATE INDEX IF NOT EXISTS idx_orders_user_id ON orders(user_id);
 `
 
-// OrderRecord is the JSON shape returned by both endpoints.
+// OrderRecord é o JSON devolvido pelas duas rotas.
 type OrderRecord struct {
 	ID        int       `json:"id"`
 	UserID    int       `json:"userId"`
@@ -36,15 +36,15 @@ type OrderRecord struct {
 	CreatedAt time.Time `json:"createdAt"`
 }
 
-// ErrInvalidOrder is returned by Create when input is plainly wrong.
+// ErrInvalidOrder quando o input do Create tá claramente errado.
 var ErrInvalidOrder = errors.New("invalid order")
 
-// Store is the order service's SQLite-backed persistence layer.
+// Store é o wrapper em volta do SQLite do serviço de pedidos.
 type Store struct {
 	database *sql.DB
 }
 
-// OpenStore opens (or creates) the SQLite file and applies the schema.
+// OpenStore abre (ou cria) o SQLite e aplica o schema.
 func OpenStore(databaseFilePath string) (*Store, error) {
 	connectionString := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)", databaseFilePath)
 	databaseHandle, openError := sql.Open("sqlite", connectionString)
@@ -62,7 +62,7 @@ func OpenStore(databaseFilePath string) (*Store, error) {
 	return &Store{database: databaseHandle}, nil
 }
 
-// Close releases the underlying database handle. Idempotent.
+// Close fecha o handle do banco. Pode ser chamado mais de uma vez.
 func (store *Store) Close() error {
 	if store == nil || store.database == nil {
 		return nil
@@ -70,8 +70,7 @@ func (store *Store) Close() error {
 	return store.database.Close()
 }
 
-// Create persists a new order. The created_at timestamp is set on the
-// server side in UTC so every replica records the same wall clock.
+// Create grava um pedido novo. O created_at é definido aqui em UTC.
 func (store *Store) Create(callContext context.Context, userID, productID int) (OrderRecord, error) {
 	if userID <= 0 || productID <= 0 {
 		return OrderRecord{}, fmt.Errorf("%w: user id and product id must be positive", ErrInvalidOrder)
@@ -98,7 +97,8 @@ func (store *Store) Create(callContext context.Context, userID, productID int) (
 	}, nil
 }
 
-// ListByUserID returns every order for a given user, oldest first.
+// ListByUserID devolve todos os pedidos de um usuário, do mais antigo
+// pro mais novo.
 func (store *Store) ListByUserID(callContext context.Context, userID int) ([]OrderRecord, error) {
 	rows, queryError := store.database.QueryContext(
 		callContext,

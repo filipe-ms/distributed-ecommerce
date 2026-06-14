@@ -12,8 +12,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// schemaStatement is the single CREATE TABLE we run at startup. Keeping it
-// as one string makes the migration trivially idempotent.
+// schemaStatement é o CREATE TABLE que roda no startup. Como tem
+// IF NOT EXISTS, é idempotente.
 const schemaStatement = `
 CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -24,25 +24,22 @@ CREATE TABLE IF NOT EXISTS users (
 );
 `
 
-// ErrEmailAlreadyRegistered is returned by CreateUser when the unique
-// constraint on the "email" column triggers. We translate it to 409 at the
-// HTTP layer.
+// ErrEmailAlreadyRegistered acontece quando o INSERT bate na constraint
+// UNIQUE do email. No HTTP isso vira 409.
 var ErrEmailAlreadyRegistered = errors.New("email is already registered")
 
-// ErrUserNotFound is returned by GetByID and GetByEmail when no row matches.
+// ErrUserNotFound quando o GetByID/GetByEmail não encontra ninguém.
 var ErrUserNotFound = errors.New("user not found")
 
-// Store wraps the SQLite handle. It is safe for concurrent use because
-// database/sql provides its own connection pool; we never share a single
-// connection across goroutines.
+// Store é o wrapper em volta do SQLite. database/sql já cuida do pool
+// de conexões, então é seguro pra usar com várias goroutines.
 type Store struct {
 	database *sql.DB
 }
 
-// OpenStore opens (or creates) the SQLite file at databaseFilePath, applies
-// the schema migration, and returns a ready-to-use Store. The "_pragma=..."
-// query parameters are recommended by modernc/sqlite for any application
-// that has more than one writer goroutine.
+// OpenStore abre (ou cria) o arquivo SQLite, aplica o schema e
+// devolve um Store pronto pra usar. Os pragmas (WAL, busy_timeout)
+// são recomendados pra qualquer aplicação com múltiplos writers.
 func OpenStore(databaseFilePath string) (*Store, error) {
 	connectionString := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)", databaseFilePath)
 	databaseHandle, openError := sql.Open("sqlite", connectionString)
@@ -60,7 +57,7 @@ func OpenStore(databaseFilePath string) (*Store, error) {
 	return &Store{database: databaseHandle}, nil
 }
 
-// Close releases the underlying database handle. Idempotent.
+// Close fecha o handle do banco. Pode ser chamado mais de uma vez.
 func (store *Store) Close() error {
 	if store == nil || store.database == nil {
 		return nil
@@ -68,9 +65,9 @@ func (store *Store) Close() error {
 	return store.database.Close()
 }
 
-// CreateUser persists a new user. The password is hashed inside this method
-// so the caller never has to think about bcrypt. ErrEmailAlreadyRegistered
-// is returned when the email is taken.
+// CreateUser salva um usuário novo. A senha é hasheada aqui dentro,
+// então quem chama não precisa pensar em bcrypt. Devolve
+// ErrEmailAlreadyRegistered se o email já existe.
 func (store *Store) CreateUser(callContext context.Context, name, email, plainPassword, role string) (PublicUserView, error) {
 	hashedPassword, hashError := authentication.HashPassword(plainPassword)
 	if hashError != nil {
@@ -99,9 +96,8 @@ func (store *Store) CreateUser(callContext context.Context, name, email, plainPa
 	}, nil
 }
 
-// GetByEmail returns the full record (including the bcrypt hash) for the
-// supplied email. The hash is only used by the login handler; nothing else
-// in the package consumes it.
+// GetByEmail devolve a linha completa (com hash) pelo email. O hash só
+// é usado no handler de login.
 func (store *Store) GetByEmail(callContext context.Context, email string) (storedUserRecord, error) {
 	row := store.database.QueryRowContext(
 		callContext,
@@ -119,7 +115,7 @@ func (store *Store) GetByEmail(callContext context.Context, email string) (store
 	return record, nil
 }
 
-// GetByID returns the public view of the user with the supplied id.
+// GetByID devolve a versão pública do usuário com aquele id.
 func (store *Store) GetByID(callContext context.Context, userID int) (PublicUserView, error) {
 	row := store.database.QueryRowContext(
 		callContext,
@@ -137,8 +133,8 @@ func (store *Store) GetByID(callContext context.Context, userID int) (PublicUser
 	return view, nil
 }
 
-// CountUsers reports how many rows the table currently holds. Used at
-// startup to decide whether to seed the default administrator account.
+// CountUsers conta quantas linhas existem na tabela. Usado no startup
+// pra decidir se já tem que criar o admin padrão.
 func (store *Store) CountUsers(callContext context.Context) (int, error) {
 	var count int
 	if scanError := store.database.QueryRowContext(callContext, `SELECT COUNT(*) FROM users`).Scan(&count); scanError != nil {
@@ -147,26 +143,36 @@ func (store *Store) CountUsers(callContext context.Context) (int, error) {
 	return count, nil
 }
 
-// SeedDefaultAdministratorIfEmpty creates a single admin user when the table
-// is empty. The credentials are documented in README_execution.md so the
-// grader can log in immediately after `docker compose up`.
-func (store *Store) SeedDefaultAdministratorIfEmpty(callContext context.Context, email, plainPassword string) error {
-	currentCount, countError := store.CountUsers(callContext)
-	if countError != nil {
-		return countError
+// EnsureDefaultAccountsExist garante que existam um admin e um usuário
+// padrão pra demonstração. A checagem é por email, então rodar várias
+// vezes não duplica registro nem sobrescreve quem já existe.
+func (store *Store) EnsureDefaultAccountsExist(callContext context.Context, adminEmail, adminPassword, userEmail, userPassword string) error {
+	if seedError := store.ensureUser(callContext, "Default Administrator", adminEmail, adminPassword, authentication.RoleAdministrator); seedError != nil {
+		return fmt.Errorf("seeding default administrator: %w", seedError)
 	}
-	if currentCount > 0 {
-		return nil
-	}
-	if _, createError := store.CreateUser(callContext, "Default Administrator", email, plainPassword, authentication.RoleAdministrator); createError != nil {
-		return fmt.Errorf("seeding default administrator: %w", createError)
+	if seedError := store.ensureUser(callContext, "Default User", userEmail, userPassword, authentication.RoleUser); seedError != nil {
+		return fmt.Errorf("seeding default user: %w", seedError)
 	}
 	return nil
 }
 
-// isUniqueConstraintViolation matches the error string the modernc/sqlite
-// driver returns when an INSERT collides with a UNIQUE index. We compare on
-// the textual marker to avoid pulling in the driver-specific error type.
+// ensureUser cria o usuário se ele não existir pelo email. Se já
+// existe, é no-op.
+func (store *Store) ensureUser(callContext context.Context, name, email, plainPassword, role string) error {
+	if _, lookupError := store.GetByEmail(callContext, email); lookupError == nil {
+		return nil
+	} else if !errors.Is(lookupError, ErrUserNotFound) {
+		return lookupError
+	}
+	if _, createError := store.CreateUser(callContext, name, email, plainPassword, role); createError != nil {
+		return createError
+	}
+	return nil
+}
+
+// isUniqueConstraintViolation identifica o erro do driver quando o
+// INSERT bate em um índice UNIQUE. A gente compara a mensagem em vez
+// de importar o tipo específico do driver.
 func isUniqueConstraintViolation(databaseError error) bool {
 	if databaseError == nil {
 		return false

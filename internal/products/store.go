@@ -1,7 +1,7 @@
-// Package products implements the catalogue service. Each instance owns its
-// own products.json file; the gateway runs two instances and coordinates
-// strong-consistency replication on top — the service itself is intentionally
-// unaware of replication so it can stay simple and easy to reason about.
+// Package products implementa o serviço de catálogo. Cada instância
+// tem seu próprio products.json; o gateway sobe duas instâncias e
+// coordena a replicação por cima — o serviço em si não sabe que tem
+// réplica, o que deixa ele simples.
 package products
 
 import (
@@ -14,25 +14,28 @@ import (
 	"sync"
 )
 
-// ProductRecord is the canonical product representation. The JSON tags are
-// also used as the on-disk format inside products.json.
+// ProductRecord é a representação canônica de um produto. As tags JSON
+// também são o formato em disco no products.json.
 type ProductRecord struct {
 	ID          int     `json:"id"`
 	Name        string  `json:"name"`
 	Price       float64 `json:"price"`
 	Description string  `json:"description"`
+	Quantity    int     `json:"quantity"`
 }
 
-// ErrProductNotFound is returned when GetByID cannot find a product.
+// ErrProductNotFound quando o GetByID não encontra.
 var ErrProductNotFound = errors.New("product not found")
 
-// ErrInvalidProduct is returned when Create receives obviously bad input.
+// ErrInvalidProduct quando o Create recebe input claramente errado.
 var ErrInvalidProduct = errors.New("invalid product")
 
-// Store is a thread-safe in-memory list of products that flushes the entire
-// list to disk on every mutation. The data set in this assignment is tiny,
-// so a full rewrite per change is cheap and removes any need for partial
-// updates or compaction.
+// ErrOutOfStock quando o DecrementStock é chamado com quantidade zero.
+var ErrOutOfStock = errors.New("out of stock")
+
+// Store é uma lista de produtos em memória, thread-safe, que reescreve
+// o arquivo inteiro em cada mudança. Como o volume de dados aqui é
+// pequeno, regravar tudo é barato.
 type Store struct {
 	storageFilePath string
 	mutex           sync.RWMutex
@@ -40,8 +43,8 @@ type Store struct {
 	highestID       int
 }
 
-// OpenStore reads (or creates) the file at storageFilePath and returns a
-// ready-to-use Store. Missing files are treated as an empty catalogue.
+// OpenStore lê (ou cria) o arquivo em storageFilePath e devolve um
+// Store pronto pra usar. Se o arquivo não existe, começa vazio.
 func OpenStore(storageFilePath string) (*Store, error) {
 	if storageFilePath == "" {
 		return nil, errors.New("storage file path is empty")
@@ -59,8 +62,8 @@ func OpenStore(storageFilePath string) (*Store, error) {
 func (store *Store) loadFromDisk() error {
 	rawBytes, readError := os.ReadFile(store.storageFilePath)
 	if errors.Is(readError, os.ErrNotExist) {
-		return store.persistLocked() // create an empty file so the next
-		// startup does not have to special-case "missing".
+		return store.persistLocked() // cria o arquivo vazio pra próxima
+		// inicialização não precisar tratar esse caso.
 	}
 	if readError != nil {
 		return fmt.Errorf("reading products file: %w", readError)
@@ -83,8 +86,8 @@ func (store *Store) loadFromDisk() error {
 	return nil
 }
 
-// ListAll returns a copy of the current catalogue, sorted by ID so the order
-// is deterministic between calls and across replicas.
+// ListAll devolve uma cópia do catálogo, ordenado por ID pra ordem
+// ser sempre a mesma entre chamadas e entre réplicas.
 func (store *Store) ListAll() []ProductRecord {
 	store.mutex.RLock()
 	defer store.mutex.RUnlock()
@@ -98,7 +101,7 @@ func (store *Store) ListAll() []ProductRecord {
 	return snapshot
 }
 
-// GetByID returns the product with the supplied ID or ErrProductNotFound.
+// GetByID devolve o produto pelo id, ou ErrProductNotFound.
 func (store *Store) GetByID(productID int) (ProductRecord, error) {
 	store.mutex.RLock()
 	defer store.mutex.RUnlock()
@@ -108,14 +111,17 @@ func (store *Store) GetByID(productID int) (ProductRecord, error) {
 	return ProductRecord{}, ErrProductNotFound
 }
 
-// Create inserts a new product, assigns the next ID, and flushes to disk.
-// The returned record is the version that was actually persisted.
-func (store *Store) Create(productName string, productPrice float64, productDescription string) (ProductRecord, error) {
+// Create insere um produto novo, atribui o próximo id e grava em disco.
+// Devolve a versão que foi de fato persistida.
+func (store *Store) Create(productName string, productPrice float64, productDescription string, productQuantity int) (ProductRecord, error) {
 	if productName == "" {
 		return ProductRecord{}, fmt.Errorf("%w: name is required", ErrInvalidProduct)
 	}
 	if productPrice < 0 {
 		return ProductRecord{}, fmt.Errorf("%w: price must be non-negative", ErrInvalidProduct)
+	}
+	if productQuantity < 0 {
+		return ProductRecord{}, fmt.Errorf("%w: quantity must be non-negative", ErrInvalidProduct)
 	}
 
 	store.mutex.Lock()
@@ -127,12 +133,13 @@ func (store *Store) Create(productName string, productPrice float64, productDesc
 		Name:        productName,
 		Price:       productPrice,
 		Description: productDescription,
+		Quantity:    productQuantity,
 	}
 	store.productsByID[created.ID] = created
 
 	if persistError := store.persistLocked(); persistError != nil {
-		// Roll back the in-memory change so we never report success while
-		// the disk has the previous state.
+		// Desfaz a mudança em memória pra nunca dar sucesso enquanto o
+		// disco ainda tem o estado antigo.
 		delete(store.productsByID, created.ID)
 		store.highestID--
 		return ProductRecord{}, persistError
@@ -140,10 +147,63 @@ func (store *Store) Create(productName string, productPrice float64, productDesc
 	return created, nil
 }
 
-// UpsertFromReplication is used by future inter-replica sync paths. It is
-// not currently called from a handler, but is included so a follow-up could
-// implement read-repair without touching Create's invariant about ID
-// assignment.
+// DecrementStock tira uma unidade do estoque. Devolve ErrOutOfStock
+// quando o produto está zerado.
+func (store *Store) DecrementStock(productID int) (ProductRecord, error) {
+	store.mutex.Lock()
+	defer store.mutex.Unlock()
+
+	found, ok := store.productsByID[productID]
+	if !ok {
+		return ProductRecord{}, ErrProductNotFound
+	}
+	if found.Quantity <= 0 {
+		return ProductRecord{}, ErrOutOfStock
+	}
+	found.Quantity--
+	store.productsByID[productID] = found
+
+	if persistError := store.persistLocked(); persistError != nil {
+		found.Quantity++
+		store.productsByID[productID] = found
+		return ProductRecord{}, persistError
+	}
+	return found, nil
+}
+
+// SeedDefaultsIfEmpty popula o catálogo com alguns itens só pra dar
+// pra fazer a demo sem precisar cadastrar nada na mão. Se o arquivo
+// já tem produtos, não faz nada.
+func (store *Store) SeedDefaultsIfEmpty() error {
+	store.mutex.RLock()
+	alreadyHasProducts := len(store.productsByID) > 0
+	store.mutex.RUnlock()
+	if alreadyHasProducts {
+		return nil
+	}
+
+	seeds := []struct {
+		Name     string
+		Price    float64
+		Quantity int
+	}{
+		{"Barbeador", 12.50, 10},
+		{"Caderno", 8.00, 10},
+		{"Chave de fenda", 15.00, 10},
+		{"Desodorante", 9.90, 10},
+		{"Bandeirinha de São João", 4.00, 10},
+	}
+	for _, seed := range seeds {
+		if _, createError := store.Create(seed.Name, seed.Price, "", seed.Quantity); createError != nil {
+			return fmt.Errorf("seeding %q: %w", seed.Name, createError)
+		}
+	}
+	return nil
+}
+
+// UpsertFromReplication existiria pra um sync entre réplicas no
+// futuro. Não é usado nos handlers atuais, mas tá aqui pra um possível
+// read-repair sem mexer no Create.
 func (store *Store) UpsertFromReplication(replicated ProductRecord) error {
 	store.mutex.Lock()
 	defer store.mutex.Unlock()
@@ -154,9 +214,8 @@ func (store *Store) UpsertFromReplication(replicated ProductRecord) error {
 	return store.persistLocked()
 }
 
-// persistLocked writes the current catalogue to disk atomically. The caller
-// must already hold store.mutex (in either read or write mode is fine —
-// this method only reads from the map).
+// persistLocked escreve o catálogo no disco de forma atômica. Quem
+// chama tem que estar segurando store.mutex.
 func (store *Store) persistLocked() error {
 	if mkdirError := os.MkdirAll(filepath.Dir(store.storageFilePath), 0o755); mkdirError != nil {
 		return fmt.Errorf("ensuring products directory: %w", mkdirError)

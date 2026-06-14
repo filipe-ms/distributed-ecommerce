@@ -1,17 +1,17 @@
 # syntax=docker/dockerfile:1.6
 #
-# Single Dockerfile shared by every binary in this repository. The SERVICE
-# build argument selects which entry-point under ./cmd to compile and bake
-# into the final image.
+# Dockerfile único usado por todos os binários do repositório. O argumento
+# de build SERVICE diz qual entrypoint dentro de ./cmd vai ser compilado.
 #
-# Build stage: compiles a fully static binary (CGO disabled because
-# modernc.org/sqlite is pure Go) so the runtime stage does not need libc.
+# Stage de build: gera um binário estático (CGO desligado porque o
+# modernc.org/sqlite é Go puro), então o stage de runtime não precisa
+# de libc.
 FROM golang:1.22-alpine AS build
 WORKDIR /src
 
-# Copy the module manifest first so the dependency-download layer stays
-# warm across edits to the source tree. go.sum is generated on the fly by
-# the subsequent `go mod tidy` if it is missing locally.
+# Copia o go.mod antes do resto pra camada de download de dependências
+# ficar quentinha entre builds. O go.sum é gerado pelo `go mod tidy`
+# logo depois, se não existir.
 COPY go.mod ./
 COPY go.sum* ./
 
@@ -25,10 +25,10 @@ RUN CGO_ENABLED=0 GOOS=linux go mod tidy && \
       -o /out/app \
       ./cmd/${SERVICE}
 
-# Runtime stage: alpine is preferred over distroless here because it makes
-# it trivial to chown the data directory the SQLite/JSON stores write into.
-# The size cost (~12 MB) is negligible for a school project and avoids the
-# permission gymnastics distroless requires for writable volumes.
+# Stage de runtime: alpine em vez de distroless porque é trivial dar
+# chown na pasta de dados onde o SQLite/JSON gravam. Os ~12 MB extras
+# não fazem diferença num trabalho de faculdade e evitam ginástica de
+# permissões.
 FROM alpine:3.19
 RUN apk add --no-cache ca-certificates tzdata && \
     addgroup -S service && adduser -S service -G service && \

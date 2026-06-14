@@ -1,9 +1,5 @@
-// Command products runs the catalogue microservice. The same binary is
-// launched twice in docker-compose (products-primary and products-replica),
-// each with its own STORAGE_PATH, so the gateway can write to both replicas
-// for strong consistency. Toggling the kill switch via POST /admin/toggle
-// triggers a graceful self-shutdown so the docker-compose restart policy
-// brings the container back up automatically.
+// Ponto de entrada do serviço de produtos. O mesmo binário roda
+// duas vezes (primary/replica), com pastas de dados diferentes.
 package main
 
 import (
@@ -42,6 +38,10 @@ func main() {
 	productStore, openError := products.OpenStore(storageFilePath)
 	if openError != nil {
 		logger.Error("opening products store", "error", openError)
+		os.Exit(1)
+	}
+	if seedError := productStore.SeedDefaultsIfEmpty(); seedError != nil {
+		logger.Error("seeding default products", "error", seedError)
 		os.Exit(1)
 	}
 

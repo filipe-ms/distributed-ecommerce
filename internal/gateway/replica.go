@@ -13,15 +13,13 @@ import (
 	"github.com/filipe-ms/distributed-ecommerce/internal/httpjson"
 )
 
-// productReplicaCount is the fixed number of replicas the assignment asks
-// for. Generalising past two would add real complexity (write quorum,
-// read-repair, vector clocks); the scope here is intentionally constrained.
+// O enunciado pede duas réplicas. Generalizar pra mais réplicas
+// envolveria coisas como quórum e read-repair, que estão fora do escopo.
 const productReplicaCount = 2
 
-// ProductReplicaManager fans out product writes to both replicas and
-// round-robins reads. Writes use strong consistency: if either replica
-// fails, the gateway returns 5xx so the client knows the catalogue is now
-// inconsistent and can retry.
+// ProductReplicaManager espalha as escritas pras duas réplicas e faz
+// round-robin nas leituras. A consistência é forte: se uma das duas
+// falhar na escrita, o gateway responde 5xx.
 type ProductReplicaManager struct {
 	replicaBaseURLs     [productReplicaCount]string
 	replicaServiceNames [productReplicaCount]string
@@ -31,9 +29,7 @@ type ProductReplicaManager struct {
 	roundRobinCounter   atomic.Uint64
 }
 
-// replicaWriteOutcome bundles everything we learnt by attempting a single
-// write against one replica. Using a named type keeps the channel and the
-// fan-in logic readable.
+// replicaWriteOutcome guarda o resultado de uma escrita em uma réplica.
 type replicaWriteOutcome struct {
 	ReplicaIndex    int
 	StatusCode      int
@@ -42,10 +38,9 @@ type replicaWriteOutcome struct {
 	FailureReason   error
 }
 
-// NewProductReplicaManager builds a manager wired against two replicas.
-// Caller-supplied service names ("products-primary", "products-replica")
-// double as the heartbeat registry keys, so unavailable replicas are
-// automatically routed around.
+// NewProductReplicaManager cria o manager já apontando pras duas
+// réplicas. Os nomes ("products-primary"/"products-replica") também
+// são as chaves usadas no heartbeat.
 func NewProductReplicaManager(
 	primaryBaseURL, replicaBaseURL string,
 	primaryServiceName, replicaServiceName string,
@@ -65,9 +60,9 @@ func NewProductReplicaManager(
 	}
 }
 
-// HandleRead serves any GET request under /api/products. It picks a replica
-// via round-robin; if that replica is currently marked unavailable, it
-// transparently falls back to the other one. If both are down it returns 503.
+// HandleRead atende qualquer GET em /api/products. Escolhe uma réplica
+// no round-robin; se a escolhida estiver fora, vai pra outra. Se as
+// duas estiverem fora, responde 503.
 func (manager *ProductReplicaManager) HandleRead(responseWriter http.ResponseWriter, incomingRequest *http.Request) {
 	startingIndex := int(manager.roundRobinCounter.Add(1) % productReplicaCount)
 	for offset := 0; offset < productReplicaCount; offset++ {
@@ -82,10 +77,9 @@ func (manager *ProductReplicaManager) HandleRead(responseWriter http.ResponseWri
 		"all product replicas are currently unavailable")
 }
 
-// HandleWrite serves any non-GET request under /api/products. It applies
-// the write to both replicas in parallel and only returns success when both
-// 2xx. On partial failure it returns 500 with the names of the offending
-// replicas and logs the inconsistency loudly so an operator can investigate.
+// HandleWrite atende qualquer escrita em /api/products. Manda pra
+// duas réplicas em paralelo e só responde sucesso se as duas
+// devolverem 2xx. Em falha parcial, devolve 500 e loga quem falhou.
 func (manager *ProductReplicaManager) HandleWrite(responseWriter http.ResponseWriter, incomingRequest *http.Request) {
 	bufferedBody, readError := io.ReadAll(io.LimitReader(incomingRequest.Body, httpjson.MaximumRequestBodyBytes+1))
 	if readError != nil {
@@ -121,8 +115,8 @@ func (manager *ProductReplicaManager) HandleWrite(responseWriter http.ResponseWr
 		return
 	}
 
-	// Both replicas accepted the write. Return whichever response arrived
-	// first — they should be byte-identical since the inputs were identical.
+	// As duas réplicas aceitaram. Como a entrada foi a mesma, qualquer
+	// uma das duas respostas serve.
 	winningOutcome := collectedOutcomes[0]
 	for headerName, headerValues := range winningOutcome.ResponseHeaders {
 		if isHopByHop(headerName) {

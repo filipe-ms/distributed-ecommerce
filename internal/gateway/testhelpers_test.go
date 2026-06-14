@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// testContext returns a background context tied to the test's lifetime. It
-// is used by the heartbeat tests so they never leak goroutines past the
-// test binary's exit.
+// testContext devolve um context vinculado ao tempo de vida do teste.
+// Usado pelos testes de heartbeat pra nunca vazar goroutines depois
+// que o binário de teste terminar.
 func testContext(t *testing.T) context.Context {
 	t.Helper()
 	rootContext, cancelRootContext := context.WithCancel(context.Background())

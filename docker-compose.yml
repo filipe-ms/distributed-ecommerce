@@ -1,13 +1,13 @@
-# docker-compose.yml — five containers, one Dockerfile.
+# docker-compose.yml — cinco containers, um único Dockerfile.
 #
-# Each backing service uses the same image build with a different SERVICE
-# argument. The gateway is the only container with a published port; the
-# other four are reachable only over the internal compose network and are
-# discovered by their service name (DNS-resolvable inside the network).
+# Cada serviço de backing usa a mesma imagem com um SERVICE diferente.
+# Só o gateway publica porta pra fora; os outros quatro só são
+# acessíveis pela rede interna do compose, e a descoberta é por nome
+# de serviço (DNS dentro da rede).
 #
-# `restart: unless-stopped` is what makes the dashboard's Kill button
-# meaningful: when the kill switch engages, the service exits gracefully and
-# the orchestrator brings it back up within seconds.
+# `restart: unless-stopped` é o que faz o botão "Kill" do dashboard
+# fazer sentido: quando o kill switch é acionado, o serviço sai
+# e o orquestrador sobe ele de novo em segundos.
 
 services:
   users:
@@ -25,6 +25,8 @@ services:
       TLS_KEY_PATH: /certs/key.pem
       DEFAULT_ADMINISTRATOR_EMAIL: admin@local
       DEFAULT_ADMINISTRATOR_PASSWORD: admin123
+      DEFAULT_USER_EMAIL: user@local
+      DEFAULT_USER_PASSWORD: user123
       TOKEN_LIFETIME_MINUTES: "60"
     volumes:
       - users-data:/data
@@ -54,8 +56,8 @@ services:
       dockerfile: Dockerfile
       args:
         SERVICE: products
-    # Reuse the same built image as the primary; we only need a different
-    # volume and a different REPLICA_NAME for logs and the heartbeat label.
+    # Reusa a mesma imagem do primary; só precisa de um volume diferente
+    # e de um REPLICA_NAME diferente pra log e label do heartbeat.
     image: distributed-ecommerce-products
     environment:
       JWT_SECRET: ${JWT_SECRET}

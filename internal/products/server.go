@@ -10,9 +10,9 @@ import (
 	"github.com/filipe-ms/distributed-ecommerce/internal/killswitch"
 )
 
-// BuildRouter wires the product service routes. The signing secret is
-// passed in even though only the create endpoint is protected, so future
-// admin-only routes can be added without changing the constructor signature.
+// BuildRouter monta as rotas do serviço de produtos. A chave de
+// assinatura é passada mesmo sem ser usada por todas as rotas pra
+// futuras rotas de admin não mudarem a assinatura da função.
 func BuildRouter(productStore *Store, killSwitch *killswitch.Switch, signingSecret []byte) http.Handler {
 	router := chi.NewRouter()
 	router.Use(middleware.RequestID)
@@ -25,6 +25,13 @@ func BuildRouter(productStore *Store, killSwitch *killswitch.Switch, signingSecr
 
 	router.Get("/products", writeListAllHandler(productStore))
 	router.Get("/products/{productId}", writeGetByIDHandler(productStore))
+
+	// Decrement: qualquer usuário autenticado pode tirar 1 do estoque
+	// (é a forma como uma compra é refletida no catálogo).
+	router.Group(func(authenticatedRouter chi.Router) {
+		authenticatedRouter.Use(authentication.RequireValidToken(signingSecret))
+		authenticatedRouter.Post("/products/{productId}/decrement", writeDecrementHandler(productStore))
+	})
 
 	router.Group(func(administratorRouter chi.Router) {
 		administratorRouter.Use(authentication.RequireValidToken(signingSecret))

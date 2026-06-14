@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Estoque — Distributed E-Commerce</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: #0e1117; color: #e6e9ef; }
+
+  nav { background: #161b22; padding: 12px 24px; border-bottom: 1px solid #30363d; display: flex; gap: 14px; align-items: center; }
+  nav .brand { font-weight: 700; font-size: 16px; margin-right: 8px; }
+  nav a { color: #79b8ff; text-decoration: none; padding: 6px 12px; border-radius: 6px; font-size: 14px; }
+  nav a.active { background: #1f6feb; color: white; }
+  nav a:hover { background: #21262d; }
+  nav .spacer { flex: 1; }
+  nav .user { color: #8b949e; font-size: 13px; margin-right: 6px; }
+
+  main { max-width: 820px; margin: 28px auto; padding: 0 24px; }
+  h1 { margin-top: 0; }
+  h2 { margin-top: 28px; }
+
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; margin-bottom: 18px; }
+
+  label { display: block; margin: 12px 0 4px; font-size: 13px; color: #8b949e; }
+  input { width: 100%; padding: 8px 10px; background: #0d1117; border: 1px solid #30363d; border-radius: 6px; color: #e6e9ef; font-size: 14px; }
+  input:focus { outline: 2px solid #1f6feb; border-color: #1f6feb; }
+
+  .row { display: flex; gap: 12px; }
+  .row > div { flex: 1; }
+
+  button { font-family: inherit; }
+  button.primary { padding: 9px 18px; background: #238636; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 14px; }
+  button.primary:hover { background: #2ea043; }
+  button.danger { padding: 6px 12px; background: #da3633; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; }
+  button.danger:hover { background: #f85149; }
+
+  table.stock { width: 100%; border-collapse: collapse; }
+  table.stock th, table.stock td { padding: 10px 8px; text-align: left; border-bottom: 1px solid #30363d; font-size: 14px; }
+  table.stock th { color: #8b949e; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  table.stock td.qty { font-variant-numeric: tabular-nums; color: #56d364; font-weight: 600; }
+  table.stock td.qty.low { color: #f59e0b; }
+  table.stock td.qty.zero { color: #da3633; }
+
+  .empty { color: #8b949e; font-size: 13px; margin: 0; }
+  .toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 18px; border-radius: 6px; color: white; max-width: 360px; box-shadow: 0 6px 18px rgba(0,0,0,0.4); }
+  .toast.ok { background: #238636; }
+  .toast.err { background: #da3633; }
+  .hint { font-size: 12px; color: #8b949e; margin-top: 8px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="brand">📦 Estoque</span>
+  <a href="/">Loja</a>
+  <a href="/dashboard">Dashboard dos serviços</a>
+  <a href="/estoque" class="active">Estoque</a>
+  <span class="spacer"></span>
+  <span class="user" id="navUser"></span>
+  <button class="danger hidden" id="logoutBtn" onclick="logout()">Sair</button>
+</nav>
+
+<main>
+
+  <!-- ===== Não logado ===== -->
+  <div id="authSection">
+    <h1>Acesso restrito</h1>
+    <div class="card">
+      <p>Pra cadastrar e ver o estoque é preciso estar logado como administrador.</p>
+      <p>Use a aba <a href="/" style="color:#79b8ff">Loja</a> pra entrar com a conta admin (<code>admin@local</code> / <code>admin123</code>) e volte pra cá.</p>
+    </div>
+  </div>
+
+  <!-- ===== Logado mas não admin ===== -->
+  <div id="notAdminSection" class="hidden">
+    <h1>Apenas administradores</h1>
+    <div class="card">
+      <p>Sua conta não tem permissão pra mexer no estoque. Entre como <code>admin@local</code> pra continuar.</p>
+    </div>
+  </div>
+
+  <!-- ===== Admin ===== -->
+  <div id="stockSection" class="hidden">
+    <h1>Cadastrar produto</h1>
+    <div class="card">
+      <form onsubmit="doCreate(event)">
+        <div class="row">
+          <div>
+            <label>Nome</label>
+            <input name="name" required>
+          </div>
+          <div>
+            <label>Quantidade</label>
+            <input name="quantity" type="number" min="0" value="10" required>
+          </div>
+        </div>
+        <div style="margin-top:16px"><button class="primary" type="submit">Adicionar ao estoque</button></div>
+        <p class="hint">A escrita é replicada em <code>products-primary</code> e <code>products-replica</code> antes de ser confirmada.</p>
+      </form>
+    </div>
+
+    <h2>Estoque atual</h2>
+    <div class="card">
+      <table class="stock" id="stockTable">
+        <thead>
+          <tr><th style="width:50px">ID</th><th>Nome</th><th style="width:120px;text-align:right">Quantidade</th></tr>
+        </thead>
+        <tbody id="stockBody"></tbody>
+      </table>
+      <p id="stockEmpty" class="empty hidden">Nenhum produto cadastrado.</p>
+    </div>
+  </div>
+
+</main>
+
+<div id="toast" class="toast hidden"></div>
+
+<script>
+const API = '/api';
+let currentUser = null;
+let currentToken = null;
+let toastTimer = null;
+
+function loadSession() {
+  const raw = localStorage.getItem('session');
+  if (!raw) return;
+  try {
+    const s = JSON.parse(raw);
+    currentUser = s.user;
+    currentToken = s.token;
+  } catch {}
+}
+function clearSession() {
+  localStorage.removeItem('session');
+  currentUser = null;
+  currentToken = null;
+}
+
+function toast(msg, kind) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast ' + (kind === 'err' ? 'err' : 'ok');
+  el.classList.remove('hidden');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.add('hidden'), 3500);
+}
+
+function render() {
+  const auth = document.getElementById('authSection');
+  const notAdmin = document.getElementById('notAdminSection');
+  const stock = document.getElementById('stockSection');
+  const navUser = document.getElementById('navUser');
+  const logoutBtn = document.getElementById('logoutBtn');
+
+  auth.classList.add('hidden');
+  notAdmin.classList.add('hidden');
+  stock.classList.add('hidden');
+
+  if (!currentUser) {
+    auth.classList.remove('hidden');
+    navUser.textContent = '';
+    logoutBtn.classList.add('hidden');
+    return;
+  }
+
+  navUser.textContent = `${currentUser.name} (${currentUser.role})`;
+  logoutBtn.classList.remove('hidden');
+
+  if (currentUser.role !== 'admin') {
+    notAdmin.classList.remove('hidden');
+    return;
+  }
+
+  stock.classList.remove('hidden');
+  refreshStock();
+}
+
+function logout() {
+  clearSession();
+  render();
+  toast('Você saiu.');
+}
+
+async function api(path, opts = {}) {
+  opts.headers = opts.headers || {};
+  if (currentToken) opts.headers['Authorization'] = 'Bearer ' + currentToken;
+  if (opts.body) opts.headers['Content-Type'] = 'application/json';
+  const res = await fetch(API + path, opts);
+  const text = await res.text();
+  let body = null;
+  try { body = text ? JSON.parse(text) : null; } catch { body = { error: text }; }
+  if (!res.ok) {
+    const err = new Error((body && body.error) || res.statusText || 'erro desconhecido');
+    err.status = res.status;
+    throw err;
+  }
+  return body;
+}
+
+async function doCreate(e) {
+  e.preventDefault();
+  const f = e.target;
+  try {
+    await api('/products', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: f.name.value,
+        price: 0,
+        description: '',
+        quantity: parseInt(f.quantity.value, 10),
+      }),
+    });
+    toast('Produto cadastrado nas duas réplicas.');
+    f.reset();
+    f.quantity.value = 10;
+    refreshStock();
+  } catch (err) {
+    toast('Falha: ' + err.message, 'err');
+  }
+}
+
+async function refreshStock() {
+  try {
+    const products = await api('/products');
+    const body = document.getElementById('stockBody');
+    body.innerHTML = '';
+    document.getElementById('stockEmpty').classList.toggle('hidden', products.length > 0);
+    products.forEach(p => {
+      const row = document.createElement('tr');
+      const qtyClass = p.quantity === 0 ? 'qty zero' : (p.quantity < 3 ? 'qty low' : 'qty');
+      row.innerHTML = `
+        <td>#${p.id}</td>
+        <td>${escapeHtml(p.name)}</td>
+        <td class="${qtyClass}" style="text-align:right">${p.quantity}</td>
+      `;
+      body.appendChild(row);
+    });
+  } catch (err) {
+    toast('Não consegui carregar o estoque: ' + err.message, 'err');
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+loadSession();
+render();
+</script>
+</body>
+</html>

@@ -11,13 +11,14 @@ import (
 	"github.com/filipe-ms/distributed-ecommerce/internal/httpjson"
 )
 
-// placeOrderRequestPayload is the JSON body POST /orders accepts. Only the
-// productId is supplied; the user is taken from the JWT so a malicious client
-// cannot place orders on behalf of someone else.
+// placeOrderRequestPayload é o corpo JSON do POST /orders. Só o
+// productId vem do cliente; o usuário a gente pega do JWT, então
+// ninguém consegue criar pedido em nome de outro.
 type placeOrderRequestPayload struct {
 	ProductID int `json:"productId"`
 }
 
+// writePlaceOrderHandler implementa o POST /orders.
 func writePlaceOrderHandler(orderStore *Store) http.HandlerFunc {
 	return func(responseWriter http.ResponseWriter, request *http.Request) {
 		callerClaims := authentication.ClaimsFromContext(request.Context())
@@ -49,6 +50,8 @@ func writePlaceOrderHandler(orderStore *Store) http.HandlerFunc {
 	}
 }
 
+// writeListByUserIDHandler implementa o GET /orders/{userId}.
+// Usuário comum só vê os próprios pedidos; admin vê os de qualquer um.
 func writeListByUserIDHandler(orderStore *Store) http.HandlerFunc {
 	return func(responseWriter http.ResponseWriter, request *http.Request) {
 		callerClaims := authentication.ClaimsFromContext(request.Context())
@@ -64,8 +67,7 @@ func writeListByUserIDHandler(orderStore *Store) http.HandlerFunc {
 			return
 		}
 
-		// Same scoping rule as in the user service: a regular user can only
-		// see their own orders; an administrator can see anyone's.
+		// Mesma regra de acesso do serviço de usuários.
 		if callerClaims.Role != authentication.RoleAdministrator && callerClaims.UserID != parsedUserID {
 			httpjson.WriteError(responseWriter, http.StatusForbidden, "you can only list your own orders")
 			return
@@ -80,6 +82,7 @@ func writeListByUserIDHandler(orderStore *Store) http.HandlerFunc {
 	}
 }
 
+// writeHealthHandler responde no /health.
 func writeHealthHandler() http.HandlerFunc {
 	return func(responseWriter http.ResponseWriter, _ *http.Request) {
 		httpjson.WriteJSON(responseWriter, http.StatusOK, map[string]string{"status": "ok"})

@@ -1,9 +1,6 @@
-// Command users runs the user microservice. It listens on HTTPS, persists
-// data in SQLite, signs JWTs with the shared JWT_SECRET, and on first start
-// seeds a default administrator account so the assignment grader can log in
-// immediately. Toggling the kill switch via POST /admin/toggle triggers a
-// graceful self-shutdown so the docker-compose restart policy brings the
-// container back up automatically.
+// Ponto de entrada do serviço de usuários. Abre o banco SQLite,
+// cria as contas padrão (admin e usuário) se faltarem, e sobe o
+// servidor HTTPS.
 package main
 
 import (
@@ -20,6 +17,8 @@ import (
 	"github.com/filipe-ms/distributed-ecommerce/internal/users"
 )
 
+// Pequeno tempo de espera antes de desligar o processo, só para
+// garantir que a resposta HTTP do toggle saia antes do shutdown.
 const responseFlushGracePeriod = 500 * time.Millisecond
 
 func main() {
@@ -41,6 +40,8 @@ func main() {
 
 	defaultAdministratorEmail := environmentValueOrDefault("DEFAULT_ADMINISTRATOR_EMAIL", "admin@local")
 	defaultAdministratorPassword := environmentValueOrDefault("DEFAULT_ADMINISTRATOR_PASSWORD", "admin123")
+	defaultUserEmail := environmentValueOrDefault("DEFAULT_USER_EMAIL", "user@local")
+	defaultUserPassword := environmentValueOrDefault("DEFAULT_USER_PASSWORD", "user123")
 
 	certificateFilePath := environmentValueOrDefault("TLS_CERTIFICATE_PATH", "/certs/cert.pem")
 	keyFilePath := environmentValueOrDefault("TLS_KEY_PATH", "/certs/key.pem")
@@ -54,8 +55,8 @@ func main() {
 
 	seedingContext, cancelSeedingContext := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancelSeedingContext()
-	if seedError := userStore.SeedDefaultAdministratorIfEmpty(seedingContext, defaultAdministratorEmail, defaultAdministratorPassword); seedError != nil {
-		logger.Error("seeding default administrator", "error", seedError)
+	if seedError := userStore.EnsureDefaultAccountsExist(seedingContext, defaultAdministratorEmail, defaultAdministratorPassword, defaultUserEmail, defaultUserPassword); seedError != nil {
+		logger.Error("seeding default accounts", "error", seedError)
 		os.Exit(1)
 	}
 
@@ -87,6 +88,8 @@ func environmentValueOrDefault(variableName, fallback string) string {
 	return fallback
 }
 
+// parseIntegerOrDefault tenta converter a variável de ambiente para int.
+// Se ela não existir ou estiver inválida, devolve o fallback.
 func parseIntegerOrDefault(variableName string, fallback int) int {
 	rawValue := os.Getenv(variableName)
 	if rawValue == "" {

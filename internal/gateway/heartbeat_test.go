@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-// startFakeService spins up a TLS test server whose /health response can be
-// flipped between 200 and 500 from the test. The returned baseURL is the
-// origin a HeartbeatRegistry would target.
+// startFakeService sobe um servidor TLS de teste cujo /health pode
+// alternar entre 200 e 500 a partir do teste. O baseURL devolvido é
+// o endereço que o HeartbeatRegistry usaria.
 type fakeService struct {
 	server         *httptest.Server
 	healthStatus   atomic.Int32
@@ -59,7 +59,7 @@ func TestHeartbeatMarksDownAfterConsecutiveFailures(t *testing.T) {
 	)
 	registry.SetFailureThreshold(2)
 
-	// Manually run two probe rounds.
+	// Roda duas rodadas de probe manualmente.
 	registry.tickOnce(testContext(t))
 	if !registry.IsAvailable("fake") {
 		t.Fatalf("after the first failure the service should still be available (one strike)")
@@ -108,7 +108,7 @@ func TestHeartbeatRecoversOnFirstSuccessAfterDown(t *testing.T) {
 	if len(kinds) != 2 {
 		t.Fatalf("expected DOWN then RECOVERED events, got %v", kinds)
 	}
-	// Newest first: RECOVERED before DOWN.
+	// Mais novo primeiro: RECOVERED antes de DOWN.
 	if kinds[0] != EventKindServiceRecovered || kinds[1] != EventKindServiceDown {
 		t.Fatalf("event order is wrong: %v", kinds)
 	}

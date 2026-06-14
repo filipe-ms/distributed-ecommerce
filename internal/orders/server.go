@@ -10,8 +10,8 @@ import (
 	"github.com/filipe-ms/distributed-ecommerce/internal/killswitch"
 )
 
-// BuildRouter wires the order service routes. Both /orders and
-// /orders/{userId} are protected by JWT validation.
+// BuildRouter monta as rotas do serviço de pedidos. Tanto /orders
+// quanto /orders/{userId} exigem JWT.
 func BuildRouter(orderStore *Store, killSwitch *killswitch.Switch, signingSecret []byte) http.Handler {
 	router := chi.NewRouter()
 	router.Use(middleware.RequestID)

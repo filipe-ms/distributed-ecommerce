@@ -12,9 +12,8 @@ import (
 	"github.com/filipe-ms/distributed-ecommerce/internal/tlsserver"
 )
 
-// GatewayConfiguration carries every external dependency the router needs.
-// It is constructed in cmd/gateway/main.go from environment variables and
-// passed in here so this package never touches os.Getenv.
+// GatewayConfiguration carrega tudo que o gateway precisa pra subir.
+// É montada em cmd/gateway/main.go a partir de variáveis de ambiente.
 type GatewayConfiguration struct {
 	UsersServiceURL              string
 	OrdersServiceURL             string
@@ -25,9 +24,8 @@ type GatewayConfiguration struct {
 	HeartbeatFailureThreshold    int
 }
 
-// Server bundles the long-lived dependencies that handlers and background
-// tasks share. It is the only place outside of main.go that knows about the
-// HTTP client used for downstream calls.
+// Server agrupa as dependências de longa vida que os handlers e os
+// loops de fundo compartilham.
 type Server struct {
 	configuration         GatewayConfiguration
 	internalClient        *http.Client
@@ -38,9 +36,9 @@ type Server struct {
 	logger                *slog.Logger
 }
 
-// NewServer builds a Server with sensible defaults. The HTTP client used for
-// internal calls skips certificate verification because we share one
-// self-signed certificate across every container.
+// NewServer monta o Server com valores padrão. O cliente HTTP usado
+// pra falar com os outros serviços ignora a verificação do certificado
+// porque a gente reusa o mesmo cert auto-assinado em todos os containers.
 func NewServer(configuration GatewayConfiguration, logger *slog.Logger) *Server {
 	if configuration.HTTPClientPerRequestTimeout == 0 {
 		configuration.HTTPClientPerRequestTimeout = 10 * time.Second
@@ -84,20 +82,18 @@ func NewServer(configuration GatewayConfiguration, logger *slog.Logger) *Server 
 	}
 }
 
-// RunHeartbeat starts the heartbeat poller and blocks until heartbeatContext
-// is cancelled. main.go runs this in a separate goroutine.
+// RunHeartbeat sobe o loop de heartbeat e fica bloqueado até o context
+// ser cancelado. O main.go roda isso em uma goroutine separada.
 func (server *Server) RunHeartbeat(heartbeatContext context.Context) {
 	server.heartbeatRegistry.Run(heartbeatContext)
 }
 
-// HeartbeatRegistry exposes the registry to handlers that need it (e.g. the
-// dashboard). It is intentionally a getter rather than an exported field so
-// code outside the package cannot accidentally swap registries at runtime.
+// HeartbeatRegistry expõe o registry pros handlers que precisam dele.
 func (server *Server) HeartbeatRegistry() *HeartbeatRegistry {
 	return server.heartbeatRegistry
 }
 
-// BuildRouter assembles the public HTTP surface of the gateway.
+// BuildRouter monta todas as rotas públicas do gateway.
 func (server *Server) BuildRouter() http.Handler {
 	router := chi.NewRouter()
 	router.Use(middleware.RequestID)
@@ -106,11 +102,10 @@ func (server *Server) BuildRouter() http.Handler {
 
 	router.Get("/health", writeGatewayHealthHandler())
 
-	// Monitoring dashboard (HTML page) plus its JSON status endpoint and the
-	// per-service toggle proxy. These are deliberately under a separate path
-	// prefix from the /api/* proxy routes so they cannot conflict with
-	// downstream service URLs.
+	// Front da loja na raiz (/) e dashboard de monitoramento (/dashboard).
+	router.Get("/", server.writeStorefrontHTMLHandler())
 	router.Get("/dashboard", server.writeDashboardHTMLHandler())
+	router.Get("/estoque", server.writeStockHTMLHandler())
 	router.Get("/administration/status", server.writeDashboardStatusHandler())
 	router.Post("/administration/toggle/{serviceName}", server.writeAdminToggleProxyHandler())
 
@@ -124,9 +119,8 @@ func (server *Server) BuildRouter() http.Handler {
 	return router
 }
 
-// buildProductRoutes returns a handler that dispatches by HTTP method:
-// GET requests round-robin between the two replicas while non-GET requests
-// fan out to both for strong-consistency writes.
+// buildProductRoutes despacha por método HTTP: GET vai pro round-robin,
+// outros métodos vão pra escrita nas duas réplicas.
 func (server *Server) buildProductRoutes() http.Handler {
 	return http.HandlerFunc(func(responseWriter http.ResponseWriter, incomingRequest *http.Request) {
 		if incomingRequest.Method == http.MethodGet {
@@ -137,7 +131,7 @@ func (server *Server) buildProductRoutes() http.Handler {
 	})
 }
 
-// buildPrefixHandler wraps a single handler so that chi's Mount accepts it.
+// buildPrefixHandler é um wrapper pro chi.Mount aceitar um único handler.
 func buildPrefixHandler(forwardHandler http.HandlerFunc) http.Handler {
 	subRouter := chi.NewRouter()
 	subRouter.Handle("/*", forwardHandler)

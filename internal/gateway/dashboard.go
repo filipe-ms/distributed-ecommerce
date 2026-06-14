@@ -11,19 +11,18 @@ import (
 	"github.com/filipe-ms/distributed-ecommerce/internal/httpjson"
 )
 
-//go:embed web/dashboard.html
+//go:embed web/dashboard.html web/index.html web/estoque.html
 var dashboardEmbeddedFiles embed.FS
 
-// dashboardStatusResponse is the JSON shape consumed by the front-end. It is
-// an aggregate of the heartbeat registry's snapshot and the recent events
-// buffer so the browser does not need to make two requests per refresh.
+// dashboardStatusResponse é o JSON que o front consome. Junta o
+// snapshot do heartbeat com a lista de eventos recentes pra evitar que
+// o navegador faça duas requisições por refresh.
 type dashboardStatusResponse struct {
 	Services []ServiceStatusSnapshot `json:"services"`
 	Events   []Event                 `json:"events"`
 }
 
-// adminToggleResponse mirrors the JSON shape exposed by every backing
-// service's POST /admin/toggle endpoint.
+// adminToggleResponse é o JSON que cada serviço devolve no /admin/toggle.
 type adminToggleResponse struct {
 	Killed bool `json:"killed"`
 }
@@ -33,6 +32,37 @@ func (server *Server) writeDashboardHTMLHandler() http.HandlerFunc {
 		htmlBytes, readError := dashboardEmbeddedFiles.ReadFile("web/dashboard.html")
 		if readError != nil {
 			httpjson.WriteError(responseWriter, http.StatusInternalServerError, "dashboard asset not embedded")
+			return
+		}
+		responseWriter.Header().Set("Content-Type", "text/html; charset=utf-8")
+		responseWriter.Header().Set("Cache-Control", "no-store")
+		responseWriter.WriteHeader(http.StatusOK)
+		_, _ = responseWriter.Write(htmlBytes)
+	}
+}
+
+// writeStorefrontHTMLHandler serve o front de loja (index.html) na raiz.
+func (server *Server) writeStorefrontHTMLHandler() http.HandlerFunc {
+	return func(responseWriter http.ResponseWriter, _ *http.Request) {
+		htmlBytes, readError := dashboardEmbeddedFiles.ReadFile("web/index.html")
+		if readError != nil {
+			httpjson.WriteError(responseWriter, http.StatusInternalServerError, "storefront asset not embedded")
+			return
+		}
+		responseWriter.Header().Set("Content-Type", "text/html; charset=utf-8")
+		responseWriter.Header().Set("Cache-Control", "no-store")
+		responseWriter.WriteHeader(http.StatusOK)
+		_, _ = responseWriter.Write(htmlBytes)
+	}
+}
+
+// writeStockHTMLHandler serve a página de estoque (cadastro e listagem
+// com nome + quantidade).
+func (server *Server) writeStockHTMLHandler() http.HandlerFunc {
+	return func(responseWriter http.ResponseWriter, _ *http.Request) {
+		htmlBytes, readError := dashboardEmbeddedFiles.ReadFile("web/estoque.html")
+		if readError != nil {
+			httpjson.WriteError(responseWriter, http.StatusInternalServerError, "stock asset not embedded")
 			return
 		}
 		responseWriter.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -52,11 +82,9 @@ func (server *Server) writeDashboardStatusHandler() http.HandlerFunc {
 	}
 }
 
-// writeAdminToggleProxyHandler proxies POST /administration/toggle/{service}
-// to the corresponding backing service's POST /admin/toggle endpoint. Each
-// "Kill" / "Revive" button on the dashboard makes one of these calls; the
-// gateway is the single place that knows the per-service base URLs so the
-// browser only needs to know the service name.
+// writeAdminToggleProxyHandler repassa o POST do botão Kill/Revive
+// pro /admin/toggle do serviço escolhido. O navegador não precisa
+// saber a URL interna de cada serviço — só o nome.
 func (server *Server) writeAdminToggleProxyHandler() http.HandlerFunc {
 	return func(responseWriter http.ResponseWriter, incomingRequest *http.Request) {
 		serviceName := chi.URLParam(incomingRequest, "serviceName")

@@ -1,7 +1,7 @@
-// Package gateway implements the API gateway: a small reverse proxy that
-// validates URL prefixes, forwards JWTs untouched, short-circuits with 503
-// when a downstream service is marked unavailable, coordinates writes across
-// the two product replicas, and serves a small monitoring dashboard.
+// Package gateway implementa o API Gateway: um reverse proxy que
+// valida o prefixo da URL, repassa o JWT, retorna 503 quando o serviço
+// downstream está fora do ar (segundo o heartbeat), coordena as
+// escritas nas duas réplicas de produtos e serve o dashboard.
 package gateway
 
 import (
@@ -13,9 +13,8 @@ import (
 	"github.com/filipe-ms/distributed-ecommerce/internal/httpjson"
 )
 
-// hopByHopHeaders are stripped on the way in and out: they describe the
-// transport hop, not the message, so leaking them across a proxy hop confuses
-// keep-alive negotiation. The list is the canonical one from RFC 7230 §6.1.
+// Headers que descrevem a conexão (não a mensagem) e por isso não
+// devem ser repassados em um proxy. Lista padrão da RFC 7230 §6.1.
 var hopByHopHeaders = []string{
 	"Connection",
 	"Keep-Alive",
@@ -27,32 +26,29 @@ var hopByHopHeaders = []string{
 	"Upgrade",
 }
 
-// ServiceRoute is the gateway's notion of a downstream microservice. The
-// Name doubles as the registry key used by the heartbeat for availability
-// look-ups; the BaseURL is the absolute origin (scheme + host + port) the
-// proxy targets.
+// ServiceRoute representa um serviço que o gateway conhece.
+// Name é a chave usada no heartbeat; BaseURL é o endereço do serviço.
 type ServiceRoute struct {
 	Name    string
 	BaseURL string
 }
 
-// availabilityProbe is the minimum interface the proxy needs from the
-// heartbeat registry. Defining it here, instead of importing the concrete
-// registry, keeps the test for the proxy from depending on the heartbeat.
+// availabilityProbe é a interface mínima que o proxy precisa do
+// heartbeat. Definir aqui evita um import circular nos testes.
 type availabilityProbe interface {
 	IsAvailable(serviceName string) bool
 }
 
-// ProxyClient is a reverse proxy that knows about service availability. A
-// single instance is shared between every route handler in the gateway.
+// ProxyClient é o reverse proxy do gateway. Sabe repassar requests e
+// olha o heartbeat antes de mandar pra frente.
 type ProxyClient struct {
 	internalHTTPClient   *http.Client
 	availabilityRegistry availabilityProbe
 }
 
-// NewProxyClient builds a ProxyClient. availabilityRegistry may be nil when
-// running in unit tests where no heartbeat exists; in that case every route
-// is treated as available.
+// NewProxyClient monta um ProxyClient. availabilityRegistry pode ser
+// nil em testes — nesse caso o proxy considera todos os serviços como
+// disponíveis.
 func NewProxyClient(internalHTTPClient *http.Client, availabilityRegistry availabilityProbe) *ProxyClient {
 	return &ProxyClient{
 		internalHTTPClient:   internalHTTPClient,
@@ -60,10 +56,9 @@ func NewProxyClient(internalHTTPClient *http.Client, availabilityRegistry availa
 	}
 }
 
-// HandlerFor returns an http.HandlerFunc that forwards every request whose
-// path starts with /api/<service>/ to the supplied route. The /api prefix is
-// stripped before the request is sent downstream, so the backing services
-// only see their native routes (e.g. /users/login, /orders/{userId}).
+// HandlerFor devolve um http.HandlerFunc que repassa toda request com
+// prefixo /api/<serviço>/ para o serviço de destino. O /api é tirado
+// antes de mandar pro downstream.
 func (proxy *ProxyClient) HandlerFor(route ServiceRoute) http.HandlerFunc {
 	return func(responseWriter http.ResponseWriter, incomingRequest *http.Request) {
 		if proxy.availabilityRegistry != nil && !proxy.availabilityRegistry.IsAvailable(route.Name) {
@@ -79,14 +74,10 @@ func (proxy *ProxyClient) HandlerFor(route ServiceRoute) http.HandlerFunc {
 	}
 }
 
-// forwardRequest is the actual proxy step. It copies method/body/headers
-// (except for the hop-by-hop set) into a new outbound request and streams
-// the response back to the original caller.
+// forwardRequest faz o trabalho do proxy de fato: copia método, corpo
+// e headers (tirando os hop-by-hop) numa nova request, e devolve a
+// resposta do downstream pro cliente original.
 func (proxy *ProxyClient) forwardRequest(responseWriter http.ResponseWriter, incomingRequest *http.Request, fullTargetURL string) {
-	// Preserve the query string. r.URL.RawQuery is present on every chi
-	// request; appending it unconditionally even when empty produces a bare
-	// "?" which curl tolerates but http.NewRequest does not strip, so we
-	// guard the join.
 	if incomingRequest.URL.RawQuery != "" {
 		fullTargetURL = fullTargetURL + "?" + incomingRequest.URL.RawQuery
 	}

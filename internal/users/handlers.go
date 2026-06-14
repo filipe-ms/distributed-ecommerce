@@ -13,14 +13,15 @@ import (
 	"github.com/filipe-ms/distributed-ecommerce/internal/httpjson"
 )
 
-// dependencies bundles everything a handler in this package needs. Using a
-// struct keeps the handler signatures clean and avoids package-level state.
+// dependencies junta tudo que um handler precisa pra rodar. Usar uma
+// struct deixa as assinaturas limpas e evita variável de pacote.
 type dependencies struct {
 	userStore     *Store
 	signingSecret []byte
 	tokenLifetime time.Duration
 }
 
+// writeRegistrationHandler implementa o POST /users/register.
 func writeRegistrationHandler(deps dependencies) http.HandlerFunc {
 	return func(responseWriter http.ResponseWriter, request *http.Request) {
 		var payload registerRequestPayload
@@ -52,6 +53,8 @@ func writeRegistrationHandler(deps dependencies) http.HandlerFunc {
 	}
 }
 
+// writeLoginHandler implementa o POST /users/login. Confere a senha
+// com bcrypt e devolve um JWT em caso de sucesso.
 func writeLoginHandler(deps dependencies) http.HandlerFunc {
 	return func(responseWriter http.ResponseWriter, request *http.Request) {
 		var payload loginRequestPayload
@@ -97,6 +100,8 @@ func writeLoginHandler(deps dependencies) http.HandlerFunc {
 	}
 }
 
+// writeGetUserByIDHandler implementa o GET /users/{userId}. Usuário
+// comum só vê o próprio perfil; admin vê o de qualquer um.
 func writeGetUserByIDHandler(deps dependencies) http.HandlerFunc {
 	return func(responseWriter http.ResponseWriter, request *http.Request) {
 		callerClaims := authentication.ClaimsFromContext(request.Context())
@@ -112,10 +117,7 @@ func writeGetUserByIDHandler(deps dependencies) http.HandlerFunc {
 			return
 		}
 
-		// A regular user can only fetch their own profile; administrators
-		// can fetch anyone's. This mirrors the access rule applied in the
-		// orders service to keep the project's authorisation story
-		// consistent.
+		// Mesma regra de acesso do serviço de pedidos.
 		if callerClaims.Role != authentication.RoleAdministrator && callerClaims.UserID != parsedID {
 			httpjson.WriteError(responseWriter, http.StatusForbidden, "you can only access your own profile")
 			return
@@ -134,12 +136,14 @@ func writeGetUserByIDHandler(deps dependencies) http.HandlerFunc {
 	}
 }
 
+// writeHealthHandler responde no /health do serviço.
 func writeHealthHandler() http.HandlerFunc {
 	return func(responseWriter http.ResponseWriter, _ *http.Request) {
 		httpjson.WriteJSON(responseWriter, http.StatusOK, map[string]string{"status": "ok"})
 	}
 }
 
+// validateRegistrationPayload faz uma validação simples do registro.
 func validateRegistrationPayload(payload registerRequestPayload) error {
 	trimmedName := strings.TrimSpace(payload.Name)
 	trimmedEmail := strings.TrimSpace(payload.Email)
@@ -155,6 +159,8 @@ func validateRegistrationPayload(payload registerRequestPayload) error {
 	return nil
 }
 
+// normaliseEmail tira espaços e deixa tudo minúsculo, pra busca não
+// depender de capitalização.
 func normaliseEmail(rawEmail string) string {
 	return strings.ToLower(strings.TrimSpace(rawEmail))
 }

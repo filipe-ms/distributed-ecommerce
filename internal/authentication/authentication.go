@@ -1,13 +1,7 @@
-// Package authentication centralises the JWT and password handling used by
-// every service in this project. Putting it in one place lets the gateway,
-// the user service, the product service and the order service share a single
-// signing secret, a single token shape and a single notion of "what is a
-// valid request". The package is intentionally small — it owns three things:
-//
-//   1. Hashing user passwords with bcrypt.
-//   2. Producing and verifying signed JWTs.
-//   3. Two HTTP middlewares (RequireValidToken, RequireAdministratorRole)
-//      that attach the verified claims to the request context.
+// Package authentication junta o que tem a ver com login dos usuários:
+// hash de senha (bcrypt), geração e validação de JWT, e os middlewares
+// que protegem as rotas. Todos os serviços importam daqui pra usar a
+// mesma chave secreta e o mesmo formato de token.
 package authentication
 
 import (
@@ -24,28 +18,20 @@ import (
 	"github.com/filipe-ms/distributed-ecommerce/internal/httpjson"
 )
 
-// RoleUser and RoleAdministrator are the only two role values understood by
-// this project. They are deliberately spelt out in full to make permission
-// checks self-documenting at the call site.
+// Os dois únicos papéis que existem no sistema.
 const (
 	RoleUser          = "user"
 	RoleAdministrator = "admin"
 )
 
-// signingMethod is the only HMAC variant we accept on incoming tokens. Pinning
-// it (instead of trusting the "alg" header) blocks the classic JWT attack
-// where an attacker forges an "alg: none" token.
+// Algoritmo HMAC fixo. Travar isso evita o ataque clássico de "alg: none".
 var signingMethod = jwt.SigningMethodHS256
 
-// bcryptCost is left at the library default (currently 10). Higher costs are
-// safer but slow tests dramatically; 10 is fine for an academic project and
-// matches what the bcrypt authors recommend for general use.
 const bcryptCost = bcrypt.DefaultCost
 
-// Claims is the payload embedded in every JWT this project issues. The
-// "userId", "email" and "role" fields are required by the assignment; the
-// embedded RegisteredClaims provides the standard "exp", "iat" and "iss"
-// fields that the JWT library validates automatically.
+// Claims é o que vai dentro do JWT. Os campos userId, email e role são
+// os que o enunciado pediu; o RegisteredClaims dá os campos padrão como
+// exp, iat e iss.
 type Claims struct {
 	UserID int    `json:"userId"`
 	Email  string `json:"email"`
@@ -53,9 +39,7 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-// HashPassword returns the bcrypt hash of plainPassword. The cost factor is
-// embedded in the returned string, so VerifyPassword does not need it as an
-// explicit parameter.
+// HashPassword gera o hash bcrypt da senha em texto puro.
 func HashPassword(plainPassword string) (string, error) {
 	hashedBytes, hashError := bcrypt.GenerateFromPassword([]byte(plainPassword), bcryptCost)
 	if hashError != nil {
@@ -64,10 +48,7 @@ func HashPassword(plainPassword string) (string, error) {
 	return string(hashedBytes), nil
 }
 
-// VerifyPassword reports whether plainPassword corresponds to the supplied
-// bcrypt hash. It returns nil on a match and a wrapped error otherwise; the
-// caller is expected to map any non-nil result to "invalid credentials"
-// without leaking which of the two ingredients was wrong.
+// VerifyPassword compara a senha digitada com o hash salvo no banco.
 func VerifyPassword(plainPassword, bcryptHash string) error {
 	if compareError := bcrypt.CompareHashAndPassword([]byte(bcryptHash), []byte(plainPassword)); compareError != nil {
 		return fmt.Errorf("verifying password: %w", compareError)
@@ -75,9 +56,8 @@ func VerifyPassword(plainPassword, bcryptHash string) error {
 	return nil
 }
 
-// SignToken builds a JWT containing the assignment-required claims plus an
-// expiration tokenLifetime in the future, signs it with the supplied secret
-// and returns the compact serialised form.
+// SignToken monta um JWT com os dados do usuário e devolve a string
+// assinada. tokenLifetime define quanto tempo o token vai ser válido.
 func SignToken(signingSecret []byte, userID int, email, role string, tokenLifetime time.Duration) (string, error) {
 	if len(signingSecret) == 0 {
 		return "", errors.New("signing secret is empty")
@@ -100,9 +80,8 @@ func SignToken(signingSecret []byte, userID int, email, role string, tokenLifeti
 	return signedToken, nil
 }
 
-// VerifyToken validates the supplied compact JWT against the secret. It
-// rejects tokens that use a non-HMAC signing method, tokens whose signature
-// fails to verify, and tokens whose "exp" claim has already passed.
+// VerifyToken confere se o token é válido (assinatura certa e não
+// expirado) e devolve as claims já decodificadas.
 func VerifyToken(signingSecret []byte, compactToken string) (*Claims, error) {
 	parsedClaims := &Claims{}
 	parsedToken, parseError := jwt.ParseWithClaims(compactToken, parsedClaims, func(token *jwt.Token) (any, error) {
@@ -120,12 +99,11 @@ func VerifyToken(signingSecret []byte, compactToken string) (*Claims, error) {
 	return parsedClaims, nil
 }
 
-// claimsContextKey is unexported so that no other package can plant a value
-// of the same key into the context.
+// Chave usada pra guardar as claims dentro do context da request.
 type claimsContextKey struct{}
 
-// ClaimsFromContext returns the verified claims attached by RequireValidToken,
-// or nil when the request is not authenticated.
+// ClaimsFromContext devolve as claims que o middleware salvou no
+// context, ou nil se a request não passou por autenticação.
 func ClaimsFromContext(requestContext context.Context) *Claims {
 	value, ok := requestContext.Value(claimsContextKey{}).(*Claims)
 	if !ok {
@@ -134,10 +112,9 @@ func ClaimsFromContext(requestContext context.Context) *Claims {
 	return value
 }
 
-// RequireValidToken is a middleware factory that returns a chi-compatible
-// middleware. The middleware extracts the bearer token from the Authorization
-// header, verifies it against signingSecret, and either attaches the resulting
-// claims to the request context or short-circuits the request with 401.
+// RequireValidToken é o middleware que exige um JWT válido. Pega o
+// header Authorization, valida, e injeta as claims no context. Se algo
+// dá errado, responde 401.
 func RequireValidToken(signingSecret []byte) func(http.Handler) http.Handler {
 	return func(nextHandler http.Handler) http.Handler {
 		return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
@@ -157,9 +134,8 @@ func RequireValidToken(signingSecret []byte) func(http.Handler) http.Handler {
 	}
 }
 
-// RequireAdministratorRole composes on top of RequireValidToken. It expects to
-// run after RequireValidToken has populated the context, and it rejects any
-// request whose claims do not carry the administrator role.
+// RequireAdministratorRole é o middleware que bloqueia quem não é admin.
+// Roda depois do RequireValidToken, então as claims já estão no context.
 func RequireAdministratorRole(nextHandler http.Handler) http.Handler {
 	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
 		claims := ClaimsFromContext(request.Context())
@@ -175,6 +151,7 @@ func RequireAdministratorRole(nextHandler http.Handler) http.Handler {
 	})
 }
 
+// extractBearerToken pega o token do header "Authorization: Bearer <x>".
 func extractBearerToken(request *http.Request) (string, error) {
 	authorizationHeader := request.Header.Get("Authorization")
 	if authorizationHeader == "" {

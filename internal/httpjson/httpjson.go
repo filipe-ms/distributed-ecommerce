@@ -1,7 +1,7 @@
-// Package httpjson provides a couple of small helpers that every service in
-// this project uses to read and write JSON over HTTP. Centralising them keeps
-// content-type, error shape and request-size limits consistent across the
-// gateway and the four backing services.
+// Package httpjson tem alguns helpers pequenos que todos os serviços
+// usam pra ler e escrever JSON via HTTP. Centralizar aqui mantém o
+// content-type, o formato de erro e o limite de tamanho do corpo
+// iguais em todo lugar.
 package httpjson
 
 import (
@@ -12,21 +12,19 @@ import (
 	"net/http"
 )
 
-// MaximumRequestBodyBytes caps incoming JSON payloads so that a malicious or
-// runaway client cannot exhaust memory by streaming a huge body. One megabyte
-// is more than enough for the modest payloads in this assignment.
+// MaximumRequestBodyBytes é o limite de tamanho do corpo da request.
+// 1 MB é mais que suficiente pros payloads do trabalho.
 const MaximumRequestBodyBytes int64 = 1 << 20
 
-// ErrorResponse is the canonical shape every service returns on a non-2xx
-// response. Keeping it tiny and consistent keeps the gateway's reverse-proxy
-// code simple — it can forward errors without rewriting them.
+// ErrorResponse é o formato canônico de qualquer resposta de erro do
+// projeto. Manter pequeno e consistente facilita a vida do gateway, que
+// só repassa o erro sem reescrever.
 type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
-// WriteJSON serialises value as JSON and writes it to responseWriter alongside
-// the supplied HTTP status code. It is a no-op for nil values, matching the
-// convention used by 204-style endpoints.
+// WriteJSON serializa value em JSON e escreve na resposta com o
+// status code dado. Se value for nil, só escreve o status (estilo 204).
 func WriteJSON(responseWriter http.ResponseWriter, statusCode int, value any) {
 	responseWriter.Header().Set("Content-Type", "application/json; charset=utf-8")
 	responseWriter.WriteHeader(statusCode)
@@ -35,26 +33,21 @@ func WriteJSON(responseWriter http.ResponseWriter, statusCode int, value any) {
 	}
 	encoder := json.NewEncoder(responseWriter)
 	if encodingError := encoder.Encode(value); encodingError != nil {
-		// At this point the headers are already on the wire, so we cannot
-		// recover; logging is the responsibility of higher-level middleware.
+		// Os headers já saíram, então não tem como recuperar; o log
+		// fica a cargo do middleware de cima.
 		_ = encodingError
 	}
 }
 
-// WriteError writes a plain JSON error response. It is the only way services
-// in this project should return non-2xx bodies so that the dashboard and the
-// gateway proxy can rely on a single response shape.
+// WriteError escreve uma resposta de erro JSON. É a única forma que
+// os serviços usam pra responder não-2xx, pra ter um formato único.
 func WriteError(responseWriter http.ResponseWriter, statusCode int, message string) {
 	WriteJSON(responseWriter, statusCode, ErrorResponse{Error: message})
 }
 
-// ReadJSON decodes the request body into target, enforcing both a hard size
-// limit and "no unknown fields" decoding so that typos in client requests
-// surface as 400s instead of being silently ignored.
-//
-// It deliberately produces a small, friendly error message — never the raw
-// json.Unmarshal output — because that error is destined to land in the
-// browser via the dashboard or curl in the README walkthrough.
+// ReadJSON decodifica o corpo da request em target. Aplica o limite de
+// tamanho e rejeita campos desconhecidos, pra erro de digitação no
+// cliente virar 400 em vez de ser ignorado em silêncio.
 func ReadJSON(request *http.Request, target any) error {
 	request.Body = http.MaxBytesReader(nil, request.Body, MaximumRequestBodyBytes)
 
@@ -65,8 +58,8 @@ func ReadJSON(request *http.Request, target any) error {
 		return classifyDecodeError(decodeError)
 	}
 
-	// Reject payloads that have more than one top-level JSON value. This is
-	// the same guard the standard library docs recommend.
+	// Rejeita corpos com mais de um valor JSON. É a recomendação dos
+	// docs da stdlib.
 	trailing := struct{}{}
 	if extraValueError := decoder.Decode(&trailing); !errors.Is(extraValueError, io.EOF) {
 		return errors.New("request body must contain a single JSON value")

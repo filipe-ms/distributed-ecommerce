@@ -9,29 +9,25 @@ import (
 	"time"
 )
 
-// HeartbeatPollInterval is the cadence at which the gateway probes every
-// downstream service. The assignment requires 5 seconds; we keep it as a
-// constant so tests can shorten it without touching the public API.
+// Tempo entre cada rodada de heartbeat. O enunciado pede 5 segundos.
 const HeartbeatPollInterval = 5 * time.Second
 
-// FailuresBeforeMarkingDown is the consecutive-failure threshold from the
-// assignment. Two missed probes (10s of unreachability) is enough to flip a
-// service to DOWN.
+// Quantas falhas seguidas pra marcar o serviço como DOWN. O enunciado
+// fala em "até 2 tentativas".
 const FailuresBeforeMarkingDown = 2
 
-// healthProbeTimeout caps how long a single /health probe is allowed to
-// take. Keeping it well below HeartbeatPollInterval ensures one slow
-// service cannot delay probes for the others.
+// Tempo máximo de cada probe individual. Mantemos abaixo do intervalo
+// pra um serviço travado não atrasar os outros.
 const healthProbeTimeout = 2 * time.Second
 
-// MonitoredService describes one service the gateway should poll.
+// MonitoredService descreve um serviço que o gateway vai vigiar.
 type MonitoredService struct {
-	Name    string // dashboard label and registry key
-	BaseURL string // origin used to construct the probe URL
+	Name    string
+	BaseURL string
 }
 
-// ServiceStatusSnapshot is the read-only view of a service the dashboard
-// uses to render its status grid.
+// ServiceStatusSnapshot é a visão somente-leitura de um serviço, usada
+// pelo dashboard pra montar o quadro de status.
 type ServiceStatusSnapshot struct {
 	Name                 string    `json:"name"`
 	BaseURL              string    `json:"baseUrl"`
@@ -41,7 +37,8 @@ type ServiceStatusSnapshot struct {
 	LastSuccessfulProbe  time.Time `json:"lastSuccessfulProbe"`
 }
 
-// monitoredServiceState is the gateway-private record kept per service.
+// monitoredServiceState é o que o gateway guarda internamente sobre
+// cada serviço.
 type monitoredServiceState struct {
 	configuration       MonitoredService
 	consecutiveFailures int
@@ -50,9 +47,8 @@ type monitoredServiceState struct {
 	lastSuccessfulProbe time.Time
 }
 
-// HeartbeatRegistry polls a fixed set of services on a ticker and exposes
-// thread-safe accessors so the proxy and the dashboard can read the latest
-// availability without blocking the polling loop.
+// HeartbeatRegistry roda o loop de heartbeat e expõe métodos thread-safe
+// pro proxy e pro dashboard lerem o status sem travar o loop.
 type HeartbeatRegistry struct {
 	mutex                  sync.RWMutex
 	servicesByName         map[string]*monitoredServiceState
@@ -63,9 +59,9 @@ type HeartbeatRegistry struct {
 	eventRing              *EventRing
 }
 
-// NewHeartbeatRegistry builds a registry pre-populated with one entry per
-// supplied service. Each service starts in the available state — we let the
-// first probe round confirm or refute that.
+// NewHeartbeatRegistry cria o registry já com uma entrada por serviço
+// monitorado. Todos começam marcados como disponíveis; a primeira
+// rodada de probes confirma ou não.
 func NewHeartbeatRegistry(monitoredServices []MonitoredService, internalHTTPClient *http.Client, logger *slog.Logger, eventRing *EventRing) *HeartbeatRegistry {
 	servicesByName := make(map[string]*monitoredServiceState, len(monitoredServices))
 	for _, current := range monitoredServices {
@@ -85,13 +81,14 @@ func NewHeartbeatRegistry(monitoredServices []MonitoredService, internalHTTPClie
 	}
 }
 
-// SetPollInterval lets tests speed up the loop. It must be called before Run.
+// SetPollInterval permite que os testes acelerem o loop. Tem que ser
+// chamado antes do Run.
 func (registry *HeartbeatRegistry) SetPollInterval(interval time.Duration) {
 	registry.pollInterval = interval
 }
 
-// SetFailureThreshold lets tests verify the recovery path with a
-// non-default threshold. Call before Run.
+// SetFailureThreshold também é só pros testes, pra exercitar o caminho
+// de recuperação com um threshold diferente.
 func (registry *HeartbeatRegistry) SetFailureThreshold(threshold int) {
 	if threshold < 1 {
 		threshold = 1
@@ -99,14 +96,14 @@ func (registry *HeartbeatRegistry) SetFailureThreshold(threshold int) {
 	registry.failureThreshold = threshold
 }
 
-// Run blocks until the supplied context is cancelled, polling every
-// registered service on each tick. Probes are issued in parallel so a single
-// hung service cannot delay the rest of the round.
+// Run trava na função fazendo um probe de cada serviço a cada tick,
+// até o context ser cancelado. Probes saem em paralelo pra um serviço
+// lento não atrasar os outros.
 func (registry *HeartbeatRegistry) Run(loopContext context.Context) {
 	ticker := time.NewTicker(registry.pollInterval)
 	defer ticker.Stop()
 
-	registry.tickOnce(loopContext) // run an immediate pass instead of waiting one full interval
+	registry.tickOnce(loopContext) // primeira rodada já no início
 
 	for {
 		select {
@@ -183,8 +180,8 @@ func (failure *probeStatusError) Error() string {
 	return http.StatusText(failure.StatusCode)
 }
 
-// recordProbeOutcome updates the per-service counters and, when a transition
-// happens, logs it and pushes an event into the ring.
+// recordProbeOutcome atualiza os contadores e, quando o serviço muda
+// de estado, registra log e empurra o evento pro ring buffer.
 func (registry *HeartbeatRegistry) recordProbeOutcome(serviceName string, probeSucceeded bool, probeError error) {
 	registry.mutex.Lock()
 	defer registry.mutex.Unlock()
@@ -230,9 +227,8 @@ func (registry *HeartbeatRegistry) recordEventLocked(newEvent Event) {
 	}
 }
 
-// IsAvailable reports whether the named service is currently considered up.
-// Unknown service names return true so the proxy never accidentally blocks
-// traffic for a service the registry simply does not know about.
+// IsAvailable diz se o serviço está disponível agora. Se o nome não
+// existir, devolve true (o proxy nunca bloqueia tráfego sem motivo).
 func (registry *HeartbeatRegistry) IsAvailable(serviceName string) bool {
 	registry.mutex.RLock()
 	defer registry.mutex.RUnlock()
@@ -243,8 +239,8 @@ func (registry *HeartbeatRegistry) IsAvailable(serviceName string) bool {
 	return state.isAvailable
 }
 
-// Snapshot returns a stable, sorted slice of every service's current status.
-// The dashboard renders this directly.
+// Snapshot devolve uma cópia do estado atual de todos os serviços, em
+// ordem alfabética. Usado pelo dashboard.
 func (registry *HeartbeatRegistry) Snapshot() []ServiceStatusSnapshot {
 	registry.mutex.RLock()
 	defer registry.mutex.RUnlock()
@@ -265,7 +261,7 @@ func (registry *HeartbeatRegistry) Snapshot() []ServiceStatusSnapshot {
 	return output
 }
 
-// EventLog returns the recent events tracked by the registry's ring.
+// EventLog devolve os eventos recentes (DOWN/RECOVERED).
 func (registry *HeartbeatRegistry) EventLog() []Event {
 	if registry.eventRing == nil {
 		return nil
@@ -273,8 +269,8 @@ func (registry *HeartbeatRegistry) EventLog() []Event {
 	return registry.eventRing.Snapshot()
 }
 
-// LookupBaseURL returns the registered base URL for a service, used by the
-// admin toggle proxy. The bool is false when the name is unknown.
+// LookupBaseURL devolve a URL base de um serviço pelo nome. Usado pelo
+// proxy do botão de toggle do dashboard.
 func (registry *HeartbeatRegistry) LookupBaseURL(serviceName string) (string, bool) {
 	registry.mutex.RLock()
 	defer registry.mutex.RUnlock()
@@ -285,8 +281,8 @@ func (registry *HeartbeatRegistry) LookupBaseURL(serviceName string) (string, bo
 	return state.configuration.BaseURL, true
 }
 
-// MarkSyntheticOutage is exposed for tests so they can simulate the result
-// of repeated probe failures without sleeping for the full poll interval.
+// MarkSyntheticOutage existe pros testes, pra simular uma queda sem
+// precisar esperar o intervalo do poll inteiro.
 func (registry *HeartbeatRegistry) MarkSyntheticOutage(serviceName string) {
 	registry.mutex.Lock()
 	defer registry.mutex.Unlock()

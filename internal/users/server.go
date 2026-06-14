@@ -11,10 +11,8 @@ import (
 	"github.com/filipe-ms/distributed-ecommerce/internal/killswitch"
 )
 
-// BuildRouter wires the entire user-service HTTP surface together. It is the
-// single seam between the package and cmd/users/main.go: the main package
-// only has to construct the dependencies and hand the router to the TLS
-// server.
+// BuildRouter monta toda a parte HTTP do serviço de usuários. É o
+// único ponto de contato entre o pacote e o cmd/users/main.go.
 func BuildRouter(userStore *Store, killSwitch *killswitch.Switch, signingSecret []byte, tokenLifetime time.Duration) http.Handler {
 	deps := dependencies{
 		userStore:     userStore,

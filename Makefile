@@ -1,16 +1,16 @@
-# Convenience targets for the distributed e-commerce stack.
+# Lista de comandos
 #
-#   make up         — generate certs (if missing), copy .env (if missing) and bring the stack up
-#   make down       — stop containers, keep data volumes
-#   make clean      — stop containers and wipe data volumes
-#   make rebuild    — no-cache rebuild then start
-#   make logs       — tail logs from every service
-#   make test       — run go test ./... inside the official golang image
-#   make certs      — regenerate TLS material (only if missing)
-#   make certs-force— always regenerate TLS material
-#   make status     — print container status
-#   make dashboard  — open the monitoring dashboard in your browser
-#   make help       — show this list
+#   make up         — gera os certs (se faltarem), copia o .env (se faltar) e sobe o sistema
+#   make down       — para os containers, mantém os volumes de dados
+#   make clean      — para os containers e apaga os volumes
+#   make rebuild    — rebuild sem cache e sobe
+#   make logs       — acompanha os logs de todos os serviços
+#   make test       — roda go test ./... dentro da imagem oficial do golang
+#   make certs      — gera o cert TLS (só se não existir)
+#   make certs-force— sempre regera o cert TLS
+#   make status     — mostra o estado dos containers
+#   make dashboard  — abre o dashboard no navegador
+#   make help       — mostra essa lista
 
 .PHONY: help up down clean rebuild logs test certs certs-force status dashboard envfile
 
@@ -19,29 +19,24 @@
 COMPOSE       := docker compose
 GATEWAY_URL   := https://localhost:8443
 
-# On macOS, Docker Desktop installs its credential helpers under
-# /Applications/Docker.app/Contents/Resources/bin but does not always add
-# that directory to the user's shell PATH. When the helper is missing,
-# `docker pull` fails with "docker-credential-desktop: executable file not
-# found in $PATH" even for anonymous pulls. Prepend it transparently when
-# the directory exists so `make up` works without any shell setup.
 DOCKER_DESKTOP_BIN := /Applications/Docker.app/Contents/Resources/bin
+
 ifneq (,$(wildcard $(DOCKER_DESKTOP_BIN)))
   export PATH := $(DOCKER_DESKTOP_BIN):$(PATH)
 endif
 
 help:
 	@echo "Targets:"
-	@echo "  up           (default) generate certs and env file, then docker compose up --build"
-	@echo "  down         stop and remove containers (keeps data volumes)"
-	@echo "  clean        stop containers and wipe data volumes"
-	@echo "  rebuild      no-cache rebuild and start"
-	@echo "  logs         tail logs from every service"
-	@echo "  test         run the Go test suite inside the golang:1.22-alpine image"
-	@echo "  certs        regenerate TLS material if missing"
-	@echo "  certs-force  always regenerate TLS material"
-	@echo "  status       show container status"
-	@echo "  dashboard    open the monitoring dashboard in your browser"
+	@echo "  up           (padrão) gera certs e .env, depois docker compose up --build"
+	@echo "  down         para e remove containers (mantém volumes de dados)"
+	@echo "  clean        para containers e apaga os volumes"
+	@echo "  rebuild      rebuild sem cache e sobe"
+	@echo "  logs         acompanha logs de todos os serviços"
+	@echo "  test         roda a suíte de testes Go dentro da imagem golang:1.22-alpine"
+	@echo "  certs        gera o cert TLS se não existir"
+	@echo "  certs-force  sempre regera o cert TLS"
+	@echo "  status       mostra o estado dos containers"
+	@echo "  dashboard    abre o dashboard no navegador"
 
 envfile:
 	@if [ ! -f .env ]; then \

@@ -39,7 +39,7 @@ func TestEventRingWrapsAroundAtCapacity(t *testing.T) {
 	if len(snapshot) != 3 {
 		t.Fatalf("expected snapshot capped at 3, got %d", len(snapshot))
 	}
-	// Newest first: should be timestamps 6, 5, 4.
+	// Mais novo primeiro: timestamps 6, 5, 4.
 	if snapshot[0].OccurredAt.Unix() != 6 {
 		t.Fatalf("expected newest event timestamp to be 6, got %d", snapshot[0].OccurredAt.Unix())
 	}

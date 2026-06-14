@@ -1,8 +1,8 @@
-// Package killswitch implements the in-process flag every backing service
-// uses to simulate an outage. The dashboard "Kill" button toggles the flag;
-// while the flag is on, the middleware short-circuits every request — even
-// /health — so the gateway's heartbeat detects the outage through exactly the
-// same code path it would in a real failure.
+// Package killswitch implementa a flag em memória que cada serviço
+// usa pra simular uma queda. O botão "Kill" do dashboard liga a flag;
+// enquanto ela tá ligada o middleware curto-circuita as requests
+// (até o /health), então o heartbeat do gateway detecta a queda
+// pelo mesmo caminho de uma falha real.
 package killswitch
 
 import (
@@ -12,42 +12,38 @@ import (
 	"github.com/filipe-ms/distributed-ecommerce/internal/httpjson"
 )
 
-// togglePath is the only endpoint that remains reachable while the kill
-// switch is active. Anything else returns 503. We keep it as a constant so
-// the middleware does not have to know about routing details.
+// togglePath é a única rota que continua respondendo enquanto o
+// kill switch tá ligado. Tudo o mais devolve 503.
 const togglePath = "/admin/toggle"
 
-// Switch holds a single atomic boolean. atomic.Bool gives us lock-free reads
-// from the request path; the mutating operation (Toggle) only happens from
-// the dashboard, so contention is essentially zero.
+// Switch guarda um único booleano atômico. atomic.Bool dá leitura sem
+// lock no caminho da request; a escrita só acontece quando o
+// dashboard manda toggle, então praticamente não tem contenção.
 type Switch struct {
 	isCurrentlyKilled        atomic.Bool
 	afterEngageCallback      func()
 }
 
-// New constructs an unset Switch (the service starts in a healthy state).
+// New cria um Switch desligado (serviço começa saudável).
 func New() *Switch {
 	return &Switch{}
 }
 
-// SetAfterEngageCallback registers a function that runs in its own goroutine
-// after the kill switch is toggled into the killed state. Production builds
-// use this to schedule a clean process shutdown (after the response has
-// been flushed back through the gateway), so the docker-compose restart
-// policy brings the container back up automatically. Tests can leave it
-// nil and just inspect the in-process flag.
+// SetAfterEngageCallback registra uma função que roda em uma goroutine
+// depois que o switch é ligado. Em produção a gente usa pra agendar o
+// shutdown do processo (depois que a resposta saiu pelo gateway), e o
+// docker-compose reinicia o container. Em testes pode ficar nil.
 func (killSwitch *Switch) SetAfterEngageCallback(callback func()) {
 	killSwitch.afterEngageCallback = callback
 }
 
-// IsKilled reports the current state. Useful in tests and in the dashboard
-// status response.
+// IsKilled diz se o switch tá ligado.
 func (killSwitch *Switch) IsKilled() bool {
 	return killSwitch.isCurrentlyKilled.Load()
 }
 
-// Toggle flips the flag and returns the new value. Implemented as a
-// CAS-loop so concurrent toggles cannot race past each other.
+// Toggle inverte a flag e devolve o novo valor. Loop com CAS pra dois
+// toggles simultâneos não passarem um pelo outro.
 func (killSwitch *Switch) Toggle() bool {
 	for {
 		previousValue := killSwitch.isCurrentlyKilled.Load()
@@ -57,9 +53,9 @@ func (killSwitch *Switch) Toggle() bool {
 	}
 }
 
-// Middleware short-circuits every incoming request with HTTP 503 while the
-// switch is engaged, except for POST /admin/toggle so the dashboard always
-// has a way back to a healthy state.
+// Middleware curto-circuita toda request com 503 enquanto o switch
+// tá ligado, com exceção do POST /admin/toggle pra sempre ter como
+// voltar atrás.
 func (killSwitch *Switch) Middleware(nextHandler http.Handler) http.Handler {
 	return http.HandlerFunc(func(responseWriter http.ResponseWriter, request *http.Request) {
 		if killSwitch.IsKilled() && !(request.URL.Path == togglePath && request.Method == http.MethodPost) {
@@ -70,12 +66,10 @@ func (killSwitch *Switch) Middleware(nextHandler http.Handler) http.Handler {
 	})
 }
 
-// ToggleHandler is the HTTP handler for POST /admin/toggle. It flips the
-// switch and returns the new state as JSON so the dashboard can update its
-// per-service indicator without polling. When the toggle moves the service
-// into the killed state and an after-engage callback is registered, the
-// callback is launched in its own goroutine so the response is fully sent
-// back to the client before the process begins shutting down.
+// ToggleHandler é o handler do POST /admin/toggle. Inverte a flag e
+// devolve o novo estado em JSON. Se a flag virou pra "killed" e
+// existe um callback registrado, ele é disparado em uma goroutine
+// depois do flush, pra resposta sair antes do shutdown.
 func (killSwitch *Switch) ToggleHandler(responseWriter http.ResponseWriter, _ *http.Request) {
 	newKilledState := killSwitch.Toggle()
 	httpjson.WriteJSON(responseWriter, http.StatusOK, map[string]bool{"killed": newKilledState})

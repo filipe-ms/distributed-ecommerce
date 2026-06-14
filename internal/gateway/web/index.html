@@ -1,0 +1,573 @@
+<!doctype html>
+<html lang="pt-br">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Loja — Distributed E-Commerce</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        font-family:
+          system-ui,
+          -apple-system,
+          sans-serif;
+        background: #0e1117;
+        color: #e6e9ef;
+      }
+
+      nav {
+        background: #161b22;
+        padding: 12px 24px;
+        border-bottom: 1px solid #30363d;
+        display: flex;
+        gap: 14px;
+        align-items: center;
+      }
+      nav .brand {
+        font-weight: 700;
+        font-size: 16px;
+        margin-right: 8px;
+      }
+      nav a {
+        color: #79b8ff;
+        text-decoration: none;
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 14px;
+      }
+      nav a.active {
+        background: #1f6feb;
+        color: white;
+      }
+      nav a:hover {
+        background: #21262d;
+      }
+      nav .spacer {
+        flex: 1;
+      }
+      nav .user {
+        color: #8b949e;
+        font-size: 13px;
+        margin-right: 6px;
+      }
+
+      main {
+        max-width: 820px;
+        margin: 28px auto;
+        padding: 0 24px;
+      }
+      h1 {
+        margin-top: 0;
+      }
+      h2 {
+        margin-top: 28px;
+      }
+
+      .card {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 18px;
+      }
+      .tabs {
+        display: flex;
+        gap: 4px;
+        margin-bottom: 18px;
+      }
+      .tab {
+        padding: 8px 16px;
+        border: 1px solid #30363d;
+        background: transparent;
+        color: #8b949e;
+        cursor: pointer;
+        border-radius: 6px;
+        font-size: 14px;
+      }
+      .tab.active {
+        background: #1f6feb;
+        color: white;
+        border-color: #1f6feb;
+      }
+
+      label {
+        display: block;
+        margin: 12px 0 4px;
+        font-size: 13px;
+        color: #8b949e;
+      }
+      input {
+        width: 100%;
+        padding: 8px 10px;
+        background: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        color: #e6e9ef;
+        font-size: 14px;
+      }
+      input:focus {
+        outline: 2px solid #1f6feb;
+        border-color: #1f6feb;
+      }
+
+      button {
+        font-family: inherit;
+      }
+      button.primary {
+        padding: 9px 18px;
+        background: #238636;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 14px;
+      }
+      button.primary:hover {
+        background: #2ea043;
+      }
+      button.danger {
+        padding: 6px 12px;
+        background: #da3633;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+      button.danger:hover {
+        background: #f85149;
+      }
+      button.buy {
+        padding: 6px 14px;
+        background: #1f6feb;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 600;
+      }
+      button.buy:hover {
+        background: #388bfd;
+      }
+      button.buy:disabled {
+        background: #30363d;
+        color: #8b949e;
+        cursor: not-allowed;
+      }
+
+      .product-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 12px 0;
+        border-bottom: 1px solid #30363d;
+        gap: 12px;
+      }
+      .product-row:last-child {
+        border-bottom: none;
+      }
+      .product-name {
+        font-weight: 600;
+      }
+      .product-qty {
+        color: #8b949e;
+        font-size: 13px;
+        margin-top: 2px;
+      }
+      .product-qty.zero {
+        color: #da3633;
+      }
+      .product-price {
+        color: #56d364;
+        font-weight: 600;
+        margin-right: 14px;
+      }
+
+      .order-row {
+        padding: 10px 0;
+        border-bottom: 1px solid #30363d;
+        font-size: 14px;
+        color: #c9d1d9;
+      }
+      .order-row:last-child {
+        border-bottom: none;
+      }
+      .order-row .meta {
+        color: #8b949e;
+        font-size: 12px;
+      }
+
+      .empty {
+        color: #8b949e;
+        font-size: 13px;
+        margin: 0;
+      }
+
+      .toast {
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        padding: 12px 18px;
+        border-radius: 6px;
+        color: white;
+        max-width: 360px;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+      }
+      .toast.ok {
+        background: #238636;
+      }
+      .toast.err {
+        background: #da3633;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+    </style>
+  </head>
+  <body>
+    <nav>
+      <span class="brand">🛒 Loja</span>
+      <a href="/" class="active">Loja</a>
+      <a href="/dashboard">Dashboard dos serviços</a>
+      <a href="/estoque">Estoque</a>
+      <span class="spacer"></span>
+      <span class="user" id="navUser"></span>
+      <button class="danger hidden" id="logoutBtn" onclick="logout()">
+        Sair
+      </button>
+    </nav>
+
+    <main>
+      <!-- ===== Não logado ===== -->
+      <div id="authSection">
+        <h1>Bem-vindo</h1>
+        <div class="card">
+          <div class="tabs">
+            <button class="tab active" id="tabLogin" onclick="showTab('login')">
+              Entrar
+            </button>
+            <button class="tab" id="tabRegister" onclick="showTab('register')">
+              Cadastrar
+            </button>
+          </div>
+
+          <form id="loginForm" onsubmit="doLogin(event)">
+            <label>E-mail</label>
+            <input type="email" name="email" required autocomplete="email" />
+            <label>Senha</label>
+            <input
+              type="password"
+              name="password"
+              required
+              autocomplete="current-password"
+            />
+            <div style="margin-top: 18px">
+              <button class="primary" type="submit">Entrar</button>
+            </div>
+            <div
+              style="
+                margin-top: 16px;
+                padding: 10px 12px;
+                background: #0d1117;
+                border: 1px solid #30363d;
+                border-radius: 6px;
+                font-size: 12px;
+                color: #8b949e;
+                line-height: 1.7;
+              "
+            >
+              <strong style="color: #c9d1d9">Contas de demonstração</strong
+              ><br />
+              Admin: <code>admin@local</code> / <code>admin123</code><br />
+              Usuário: <code>user@local</code> / <code>user123</code>
+            </div>
+          </form>
+
+          <form id="registerForm" class="hidden" onsubmit="doRegister(event)">
+            <label>Nome</label>
+            <input type="text" name="name" required />
+            <label>E-mail</label>
+            <input type="email" name="email" required autocomplete="email" />
+            <label>Senha (mínimo 6 caracteres)</label>
+            <input
+              type="password"
+              name="password"
+              minlength="6"
+              required
+              autocomplete="new-password"
+            />
+            <div style="margin-top: 18px">
+              <button class="primary" type="submit">Criar conta</button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- ===== Logado ===== -->
+      <div id="storeSection" class="hidden">
+        <h1>Produtos</h1>
+        <div class="card">
+          <div id="productsList"></div>
+          <p id="productsEmpty" class="empty hidden">
+            Nenhum produto disponível.
+          </p>
+        </div>
+
+        <h2>Meus pedidos</h2>
+        <div class="card">
+          <div id="ordersList"></div>
+          <p id="ordersEmpty" class="empty hidden">
+            Você ainda não fez nenhum pedido.
+          </p>
+        </div>
+      </div>
+    </main>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <script>
+      const API = "/api";
+      let currentUser = null;
+      let currentToken = null;
+      let toastTimer = null;
+
+      // ---------- Sessão ----------
+      function loadSession() {
+        const raw = localStorage.getItem("session");
+        if (!raw) return;
+        try {
+          const s = JSON.parse(raw);
+          currentUser = s.user;
+          currentToken = s.token;
+        } catch {}
+      }
+      function saveSession() {
+        localStorage.setItem(
+          "session",
+          JSON.stringify({ user: currentUser, token: currentToken }),
+        );
+      }
+      function clearSession() {
+        localStorage.removeItem("session");
+        currentUser = null;
+        currentToken = null;
+      }
+
+      // ---------- UI ----------
+      function showTab(name) {
+        document
+          .getElementById("tabLogin")
+          .classList.toggle("active", name === "login");
+        document
+          .getElementById("tabRegister")
+          .classList.toggle("active", name === "register");
+        document
+          .getElementById("loginForm")
+          .classList.toggle("hidden", name !== "login");
+        document
+          .getElementById("registerForm")
+          .classList.toggle("hidden", name !== "register");
+      }
+
+      function toast(msg, kind) {
+        const el = document.getElementById("toast");
+        el.textContent = msg;
+        el.className = "toast " + (kind === "err" ? "err" : "ok");
+        el.classList.remove("hidden");
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => el.classList.add("hidden"), 3500);
+      }
+
+      function render() {
+        if (currentUser) {
+          document.getElementById("authSection").classList.add("hidden");
+          document.getElementById("storeSection").classList.remove("hidden");
+          document.getElementById("navUser").textContent =
+            `${currentUser.name} (${currentUser.role})`;
+          document.getElementById("logoutBtn").classList.remove("hidden");
+          refreshProducts();
+          refreshOrders();
+        } else {
+          document.getElementById("authSection").classList.remove("hidden");
+          document.getElementById("storeSection").classList.add("hidden");
+          document.getElementById("navUser").textContent = "";
+          document.getElementById("logoutBtn").classList.add("hidden");
+        }
+      }
+
+      // ---------- API ----------
+      async function api(path, opts = {}) {
+        opts.headers = opts.headers || {};
+        if (currentToken)
+          opts.headers["Authorization"] = "Bearer " + currentToken;
+        if (opts.body) opts.headers["Content-Type"] = "application/json";
+        const res = await fetch(API + path, opts);
+        const text = await res.text();
+        let body = null;
+        try {
+          body = text ? JSON.parse(text) : null;
+        } catch {
+          body = { error: text };
+        }
+        if (!res.ok) {
+          const err = new Error(
+            (body && body.error) || res.statusText || "erro desconhecido",
+          );
+          err.status = res.status;
+          throw err;
+        }
+        return body;
+      }
+
+      async function doRegister(e) {
+        e.preventDefault();
+        const f = e.target;
+        try {
+          await api("/users/register", {
+            method: "POST",
+            body: JSON.stringify({
+              name: f.name.value,
+              email: f.email.value,
+              password: f.password.value,
+            }),
+          });
+          toast("Conta criada! Agora é só entrar.");
+          document.getElementById("loginForm").email.value = f.email.value;
+          f.reset();
+          showTab("login");
+        } catch (err) {
+          toast(err.message, "err");
+        }
+      }
+
+      async function doLogin(e) {
+        e.preventDefault();
+        const f = e.target;
+        try {
+          const res = await api("/users/login", {
+            method: "POST",
+            body: JSON.stringify({
+              email: f.email.value,
+              password: f.password.value,
+            }),
+          });
+          currentUser = res.user;
+          currentToken = res.token;
+          saveSession();
+          toast(`Bem-vindo, ${res.user.name}!`);
+          f.reset();
+          render();
+        } catch (err) {
+          toast(err.message, "err");
+        }
+      }
+
+      function logout() {
+        clearSession();
+        render();
+        toast("Você saiu.");
+      }
+
+      async function refreshProducts() {
+        try {
+          const products = await api("/products");
+          const list = document.getElementById("productsList");
+          list.innerHTML = "";
+          document
+            .getElementById("productsEmpty")
+            .classList.toggle("hidden", products.length > 0);
+          products.forEach((p) => {
+            const row = document.createElement("div");
+            row.className = "product-row";
+            const qtyClass =
+              p.quantity === 0 ? "product-qty zero" : "product-qty";
+            const qtyText =
+              p.quantity === 0 ? "Esgotado" : `${p.quantity} em estoque`;
+            row.innerHTML = `
+        <div>
+          <div class="product-name">${escapeHtml(p.name)}</div>
+          <div class="${qtyClass}">${qtyText}</div>
+        </div>
+        <div>
+          <span class="product-price">R$ ${Number(p.price).toFixed(2)}</span>
+          <button class="buy" ${p.quantity === 0 ? "disabled" : ""}>Pedir</button>
+        </div>
+      `;
+            const btn = row.querySelector("button.buy");
+            if (!btn.disabled)
+              btn.addEventListener("click", () => buyProduct(p.id));
+            list.appendChild(row);
+          });
+        } catch (err) {
+          toast("Não consegui carregar produtos: " + err.message, "err");
+        }
+      }
+
+      async function buyProduct(productId) {
+        try {
+          // Tira 1 do estoque (replicado nas duas réplicas).
+          await api(`/products/${productId}/decrement`, { method: "POST" });
+          // Registra o pedido.
+          await api("/orders", {
+            method: "POST",
+            body: JSON.stringify({ productId }),
+          });
+          toast("Pedido feito!");
+          refreshProducts();
+          refreshOrders();
+        } catch (err) {
+          toast("Falha no pedido: " + err.message, "err");
+          // Atualiza pra refletir o estado real (caso uma das duas chamadas tenha mexido no estoque).
+          refreshProducts();
+        }
+      }
+
+      async function refreshOrders() {
+        try {
+          const orders = await api("/orders/" + currentUser.id);
+          const list = document.getElementById("ordersList");
+          list.innerHTML = "";
+          document
+            .getElementById("ordersEmpty")
+            .classList.toggle("hidden", orders.length > 0);
+          orders.forEach((o) => {
+            const row = document.createElement("div");
+            row.className = "order-row";
+            const date = new Date(o.createdAt).toLocaleString("pt-BR");
+            row.innerHTML = `
+        Pedido <strong>#${o.id}</strong> &middot; produto ${o.productId}
+        <div class="meta">${date}</div>
+      `;
+            list.appendChild(row);
+          });
+        } catch (err) {
+          toast("Não consegui carregar pedidos: " + err.message, "err");
+        }
+      }
+
+      function escapeHtml(s) {
+        return String(s).replace(
+          /[&<>"']/g,
+          (c) =>
+            ({
+              "&": "&amp;",
+              "<": "&lt;",
+              ">": "&gt;",
+              '"': "&quot;",
+              "'": "&#39;",
+            })[c],
+        );
+      }
+
+      // ---------- Boot ----------
+      loadSession();
+      render();
+    </script>
+  </body>
+</html>

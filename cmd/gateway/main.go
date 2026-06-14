@@ -1,8 +1,5 @@
-// Command gateway runs the API gateway. It is the only service exposed
-// outside the docker-compose network: clients hit the gateway, which
-// forwards requests to the users, products and orders services over HTTPS
-// while preserving the bearer token. The gateway also runs a heartbeat
-// loop that flips routes to 503 when a downstream service stops responding.
+// Ponto de entrada do API Gateway. Lê as variáveis de ambiente,
+// monta o servidor e dispara o heartbeat em uma goroutine separada.
 package main
 
 import (
@@ -62,6 +59,8 @@ func main() {
 	logger.Info("gateway shut down cleanly")
 }
 
+// environmentValueOrDefault retorna o valor da variável de ambiente
+// ou o fallback quando a variável não foi definida.
 func environmentValueOrDefault(variableName, fallback string) string {
 	if value := os.Getenv(variableName); value != "" {
 		return value

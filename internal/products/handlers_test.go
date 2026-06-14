@@ -53,8 +53,8 @@ func performJSONProductRequest(router http.Handler, method, path string, payload
 
 func TestStoreCreateAssignsAscendingIDs(t *testing.T) {
 	productStore := openTemporaryProductStore(t)
-	first, _ := productStore.Create("Coffee", 9.99, "Arabica")
-	second, _ := productStore.Create("Tea", 4.50, "Earl Grey")
+	first, _ := productStore.Create("Coffee", 9.99, "Arabica", 0)
+	second, _ := productStore.Create("Tea", 4.50, "Earl Grey", 0)
 	if first.ID != 1 || second.ID != 2 {
 		t.Fatalf("expected IDs 1 and 2, got %d and %d", first.ID, second.ID)
 	}
@@ -62,11 +62,11 @@ func TestStoreCreateAssignsAscendingIDs(t *testing.T) {
 
 func TestStoreCreateRejectsInvalid(t *testing.T) {
 	productStore := openTemporaryProductStore(t)
-	_, emptyNameError := productStore.Create("", 1.0, "")
+	_, emptyNameError := productStore.Create("", 1.0, "", 0)
 	if !errors.Is(emptyNameError, ErrInvalidProduct) {
 		t.Fatalf("expected ErrInvalidProduct for empty name, got %v", emptyNameError)
 	}
-	_, negativePriceError := productStore.Create("Coffee", -1.0, "")
+	_, negativePriceError := productStore.Create("Coffee", -1.0, "", 0)
 	if !errors.Is(negativePriceError, ErrInvalidProduct) {
 		t.Fatalf("expected ErrInvalidProduct for negative price, got %v", negativePriceError)
 	}
@@ -75,8 +75,8 @@ func TestStoreCreateRejectsInvalid(t *testing.T) {
 func TestStoreSurvivesReopen(t *testing.T) {
 	storagePath := filepath.Join(t.TempDir(), "products.json")
 	firstStore, _ := OpenStore(storagePath)
-	_, _ = firstStore.Create("Coffee", 9.99, "Arabica")
-	_, _ = firstStore.Create("Tea", 4.50, "Earl Grey")
+	_, _ = firstStore.Create("Coffee", 9.99, "Arabica", 0)
+	_, _ = firstStore.Create("Tea", 4.50, "Earl Grey", 0)
 
 	reopenedStore, reopenError := OpenStore(storagePath)
 	if reopenError != nil {
@@ -89,8 +89,8 @@ func TestStoreSurvivesReopen(t *testing.T) {
 	if persistedList[0].ID != 1 || persistedList[1].ID != 2 {
 		t.Fatalf("IDs not preserved across reopen: %+v", persistedList)
 	}
-	// New IDs should continue past the persisted highest, not reset to 1.
-	nextProduct, _ := reopenedStore.Create("Cocoa", 5.0, "")
+	// Novos IDs continuam depois do maior persistido, não voltam pra 1.
+	nextProduct, _ := reopenedStore.Create("Cocoa", 5.0, "", 0)
 	if nextProduct.ID != 3 {
 		t.Fatalf("expected next ID to be 3, got %d", nextProduct.ID)
 	}
@@ -98,7 +98,7 @@ func TestStoreSurvivesReopen(t *testing.T) {
 
 func TestHandlerListAllReturnsCatalogue(t *testing.T) {
 	router, productStore := buildProductRouter(t)
-	_, _ = productStore.Create("Coffee", 9.99, "Arabica")
+	_, _ = productStore.Create("Coffee", 9.99, "Arabica", 0)
 
 	recordedResponse := performJSONProductRequest(router, http.MethodGet, "/products", nil, "")
 	if recordedResponse.Code != http.StatusOK {

@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// EventKind enumerates the events the dashboard cares about. Keeping it as
-// typed strings (rather than ints) makes the JSON payload self-explanatory.
+// EventKind é o tipo dos eventos que o dashboard mostra. Manter como
+// string deixa o JSON auto-explicativo.
 type EventKind string
 
 const (
@@ -14,17 +14,17 @@ const (
 	EventKindServiceRecovered EventKind = "RECOVERED"
 )
 
-// Event captures one transition reported by the heartbeat loop. The
-// dashboard consumes a slice of these to render its activity log.
+// Event guarda uma transição reportada pelo loop de heartbeat. O
+// dashboard consome uma lista desses pra montar o log de atividade.
 type Event struct {
 	OccurredAt  time.Time `json:"at"`
 	ServiceName string    `json:"service"`
 	Kind        EventKind `json:"kind"`
 }
 
-// EventRing is a tiny fixed-capacity circular buffer. We store transitions
-// only (not every successful tick) so a 50-slot buffer comfortably covers
-// the recent history a grader looking at the dashboard would care about.
+// EventRing é um buffer circular de capacidade fixa. A gente só guarda
+// transições (não cada tick com sucesso), então 50 entradas dão e
+// sobram pro histórico que o dashboard mostra.
 type EventRing struct {
 	mutex          sync.Mutex
 	storage        []Event
@@ -33,7 +33,7 @@ type EventRing struct {
 	capacity       int
 }
 
-// NewEventRing builds an empty ring with the supplied capacity.
+// NewEventRing cria um ring vazio com a capacidade pedida.
 func NewEventRing(capacity int) *EventRing {
 	if capacity <= 0 {
 		capacity = 50
@@ -44,8 +44,8 @@ func NewEventRing(capacity int) *EventRing {
 	}
 }
 
-// Push records one event. The oldest entry is overwritten when the buffer
-// fills up, matching the assignment's "recent events" requirement.
+// Push adiciona um evento. Quando o buffer enche, sobrescreve o mais
+// antigo, que é o que o enunciado pede pra "eventos recentes".
 func (ring *EventRing) Push(newEvent Event) {
 	ring.mutex.Lock()
 	defer ring.mutex.Unlock()
@@ -54,8 +54,8 @@ func (ring *EventRing) Push(newEvent Event) {
 	ring.totalAdded++
 }
 
-// Snapshot returns a copy of the events in newest-first order, which is the
-// shape the dashboard wants for rendering a log.
+// Snapshot devolve uma cópia dos eventos do mais novo pro mais velho,
+// que é o jeito que o dashboard quer mostrar.
 func (ring *EventRing) Snapshot() []Event {
 	ring.mutex.Lock()
 	defer ring.mutex.Unlock()
@@ -70,7 +70,7 @@ func (ring *EventRing) Snapshot() []Event {
 
 	output := make([]Event, currentLength)
 	for offset := 0; offset < currentLength; offset++ {
-		// The most recently written slot is one position behind nextWriteIndex.
+		// O slot mais recente fica uma posição atrás do nextWriteIndex.
 		readIndex := (ring.nextWriteIndex - 1 - offset + ring.capacity) % ring.capacity
 		output[offset] = ring.storage[readIndex]
 	}
