@@ -49,7 +49,16 @@ Docker image at build time, so you only need to run this script once
 
 ## 4. Starting the stack
 
-From the repository root:
+The repository ships with a `Makefile` whose default target does the whole
+flow — copy `.env` from the example, generate certs if missing, and run
+`docker compose up --build`:
+
+```bash
+make
+```
+
+If you'd rather invoke compose directly, this is exactly what `make up`
+runs:
 
 ```bash
 docker compose up --build
@@ -67,8 +76,20 @@ five containers are running:
 | `products-replica` | `5012` | Catalogue replica B |
 | `orders` | `5003` | SQLite-backed order service |
 
-Tear everything down with `docker compose down`. Volumes are kept by
-default; add `-v` to wipe persisted data as well.
+Tear everything down with `make down` (or `docker compose down`). Volumes
+are kept by default; `make clean` (or `docker compose down -v`) wipes the
+persisted SQLite databases and product JSON files.
+
+Other handy targets:
+
+```bash
+make help        # list every available target
+make rebuild     # no-cache rebuild and start
+make logs        # tail logs from every service
+make test        # run go test ./... inside the golang:1.22-alpine image
+make status      # show container status
+make dashboard   # open https://localhost:8443/dashboard in the browser
+```
 
 ## 5. The dashboard
 
