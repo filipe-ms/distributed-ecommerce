@@ -1,0 +1,117 @@
+# docker-compose.yml — five containers, one Dockerfile.
+#
+# Each backing service uses the same image build with a different SERVICE
+# argument. The gateway is the only container with a published port; the
+# other four are reachable only over the internal compose network and are
+# discovered by their service name (DNS-resolvable inside the network).
+#
+# `restart: unless-stopped` is what makes the dashboard's Kill button
+# meaningful: when the kill switch engages, the service exits gracefully and
+# the orchestrator brings it back up within seconds.
+
+services:
+  users:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: users
+    image: distributed-ecommerce-users
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      LISTEN_ADDRESS: ":5001"
+      DATABASE_PATH: /data/users.db
+      TLS_CERTIFICATE_PATH: /certs/cert.pem
+      TLS_KEY_PATH: /certs/key.pem
+      DEFAULT_ADMINISTRATOR_EMAIL: admin@local
+      DEFAULT_ADMINISTRATOR_PASSWORD: admin123
+      TOKEN_LIFETIME_MINUTES: "60"
+    volumes:
+      - users-data:/data
+    restart: unless-stopped
+
+  products-primary:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: products
+    image: distributed-ecommerce-products
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      LISTEN_ADDRESS: ":5002"
+      STORAGE_PATH: /data/products.json
+      TLS_CERTIFICATE_PATH: /certs/cert.pem
+      TLS_KEY_PATH: /certs/key.pem
+      REPLICA_NAME: products-primary
+    volumes:
+      - products-primary-data:/data
+    restart: unless-stopped
+
+  products-replica:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: products
+    # Reuse the same built image as the primary; we only need a different
+    # volume and a different REPLICA_NAME for logs and the heartbeat label.
+    image: distributed-ecommerce-products
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      LISTEN_ADDRESS: ":5012"
+      STORAGE_PATH: /data/products.json
+      TLS_CERTIFICATE_PATH: /certs/cert.pem
+      TLS_KEY_PATH: /certs/key.pem
+      REPLICA_NAME: products-replica
+    volumes:
+      - products-replica-data:/data
+    restart: unless-stopped
+
+  orders:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: orders
+    image: distributed-ecommerce-orders
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      LISTEN_ADDRESS: ":5003"
+      DATABASE_PATH: /data/orders.db
+      TLS_CERTIFICATE_PATH: /certs/cert.pem
+      TLS_KEY_PATH: /certs/key.pem
+    volumes:
+      - orders-data:/data
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE: gateway
+    image: distributed-ecommerce-gateway
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      LISTEN_ADDRESS: ":8443"
+      USERS_SERVICE_URL: https://users:5001
+      ORDERS_SERVICE_URL: https://orders:5003
+      PRODUCTS_PRIMARY_URL: https://products-primary:5002
+      PRODUCTS_REPLICA_URL: https://products-replica:5012
+      TLS_CERTIFICATE_PATH: /certs/cert.pem
+      TLS_KEY_PATH: /certs/key.pem
+    ports:
+      - "8443:8443"
+    depends_on:
+      - users
+      - orders
+      - products-primary
+      - products-replica
+    restart: unless-stopped
+
+volumes:
+  users-data:
+  products-primary-data:
+  products-replica-data:
+  orders-data:
