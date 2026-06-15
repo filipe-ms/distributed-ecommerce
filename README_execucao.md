@@ -1,251 +1,261 @@
 # Guia de Execução
 
-Este documento explica como rodar o sistema localmente em **macOS** ou
-**Linux**, mostra o fluxo de demo que exercita todos os requisitos do
-trabalho e como usar o dashboard pra simular e se recuperar de uma
-queda de serviço.
+Este documento explica como rodar o sistema localmente em **UNIX**
+(macOS ou Linux) ou **WSL** (no Windows) e como usar o dashboard para simular e se recuperar de uma queda de serviço.
 
-## 1. Pré-requisitos
+> **Windows puro não é suportado.** Use WSL — `make`, `bash` e o script
+> de geração de certificado dependem de um shell UNIX.
 
-A única coisa que precisa estar instalada é o Docker:
+## 1. Caminho rápido
 
-| Ferramenta | Versão testada |
-|------------|----------------|
-| Docker (Engine ou Desktop) | 24.x ou mais novo |
-| Plugin Docker Compose | v2.x |
+Tendo o Docker instalado, dois comandos:
 
-`curl` e `jq` deixam o fluxo de demo mais legível, mas são opcionais.
-**Não precisa instalar Go na máquina** — o build acontece dentro da
-imagem `golang:1.22-alpine`.
+```bash
+git clone <repo> && cd projeto
+make
+```
+
+O alvo padrão (`make` = `make up`) faz o pacote inteiro:
+
+1. Copia `.env` a partir do `.env.example` se faltar
+2. Gera `certs/cert.pem` + `certs/key.pem` se faltarem (válido 365 dias)
+3. Roda `docker compose up --build`
+
+A primeira build leva uns 90 segundos (download dos módulos Go +
+compilação). As próximas reusam cache e sobem em poucos segundos.
+
+Quando tudo estiver no ar, abra:
+
+| URL                                | Pra quê                                               |
+| ---------------------------------- | ----------------------------------------------------- |
+| <https://localhost:8443/>          | Loja — cadastro, login, ver produtos, fazer pedido    |
+| <https://localhost:8443/estoque>   | Estoque — cadastrar produto e ver quantidades (admin) |
+| <https://localhost:8443/dashboard> | Status dos serviços + simulação de quedas             |
+
+O navegador vai reclamar do certificado auto-assinado na primeira vez
+— é só aceitar.
+
+## 2. Pré-requisitos
+
+| Ferramenta                 | Versão testada               |
+| -------------------------- | ---------------------------- |
+| Docker (Engine ou Desktop) | 24.x ou mais novo            |
+| Plugin Docker Compose      | v2.x                         |
+| `make`                     | qualquer versão (BSD ou GNU) |
+
+`curl` e `jq` deixam o fluxo de demo via terminal mais legível, mas são
+opcionais. **Não precisa instalar Go na máquina** — o build acontece
+dentro da imagem `golang:1.22-alpine`.
 
 ### macOS
-
-A forma mais fácil é instalar o **Docker Desktop**:
 
 ```bash
 brew install --cask docker
 ```
 
-Depois abra o app uma vez (ele pede permissão de admin pra inicializar).
-Quando o ícone do Docker estabilizar na barra de menu, está pronto.
+Abra o Docker Desktop uma vez (ele pede permissão de admin pra
+inicializar). Quando o ícone estabilizar na barra de menu, está pronto.
 
-### Linux (Ubuntu / Debian / Fedora)
+### Linux
 
-Instale o Docker Engine seguindo o passo-a-passo da [documentação
+Instale o Docker Engine pela [documentação
 oficial](https://docs.docker.com/engine/install/). Resumo no Ubuntu:
 
 ```bash
 sudo apt-get update
-sudo apt-get install docker.io docker-compose-plugin
+sudo apt-get install docker.io docker-compose-plugin make
 sudo usermod -aG docker $USER
 # faça logout/login pra valer a alteração de grupo
 ```
 
-Depois confira que o `docker compose version` responde sem erro.
+### Windows (WSL)
 
-## 2. Configuração
+Use o **Docker Desktop com integração WSL2 habilitada** e rode todos
+os comandos deste guia de dentro do shell Ubuntu (ou outra distro WSL).
+A partir daí o fluxo é idêntico ao Linux.
 
-A única coisa que o sistema precisa configurada é a chave secreta do
-JWT. Copie o exemplo e ajuste se quiser:
+## 3. Targets do Makefile
 
-```bash
-cp .env.example .env
-```
-
-O valor padrão (`dev-secret-change-me-before-shipping`) já serve pro
-trabalho; em produção você usaria uma string aleatória longa.
-
-## 3. Gerando o certificado TLS
-
-Todos os containers usam o mesmo certificado auto-assinado pra HTTPS.
-O script abaixo gera um novo:
+Tudo que importa tá ali. `make help` lista também:
 
 ```bash
-bash certs/generate.sh
-```
-
-Isso produz `certs/cert.pem` e `certs/key.pem`. Eles são copiados pra
-imagem Docker no momento do build, então só precisa rodar uma vez (ou
-de novo quando expirar, depois de um ano).
-
-> **Nota:** o cert é válido pra `localhost` e pros nomes internos
-> (`gateway`, `users`, `products-primary`, `products-replica`,
-> `orders`). O navegador vai mostrar um aviso na primeira vez que você
-> abrir o dashboard — é só aceitar e seguir.
-
-## 4. Subindo o sistema
-
-O repositório vem com um `Makefile` cujo alvo padrão faz o fluxo todo
-— copia o `.env` do exemplo, gera os certs se não existirem e roda
-`docker compose up --build`:
-
-```bash
-make
-```
-
-Se preferir chamar o compose direto, é exatamente o que o `make up`
-roda por baixo:
-
-```bash
-docker compose up --build
-```
-
-A primeira build demora uns 90 segundos (download dos módulos Go +
-compilação). Builds seguintes usam cache e sobem em poucos segundos.
-Quando tudo estiver no ar, cinco containers vão estar rodando:
-
-| Container | Porta interna | Notas |
-|-----------|---------------|-------|
-| `gateway` | `8443` (publicada) | Único ponto de entrada, também serve o dashboard |
-| `users` | `5001` | Serviço de usuários (SQLite) |
-| `products-primary` | `5002` | Réplica A do catálogo |
-| `products-replica` | `5012` | Réplica B do catálogo |
-| `orders` | `5003` | Serviço de pedidos (SQLite) |
-
-Pra derrubar tudo: `make down` (ou `docker compose down`). Os volumes
-são mantidos por padrão; `make clean` (ou `docker compose down -v`)
-apaga também os bancos SQLite e o JSON de produtos.
-
-Outros alvos úteis:
-
-```bash
-make help        # lista todos os alvos disponíveis
+make             # padrão = make up (gera certs/.env e sobe a stack)
+make down        # para os containers, mantém volumes
+make clean       # para os containers e apaga os volumes
 make rebuild     # rebuild sem cache e sobe
 make logs        # acompanha os logs de todos os serviços
 make test        # roda go test ./... dentro da imagem golang:1.22-alpine
 make status      # mostra o estado dos containers
-make dashboard   # abre https://localhost:8443/dashboard no navegador
+make dashboard   # abre o dashboard no navegador (open / xdg-open)
+make certs       # gera o cert TLS se não existir
+make certs-force # sempre regera o cert TLS
 ```
 
-## 5. O dashboard
+Quando tudo estiver no ar, cinco containers estão rodando:
 
-Abra <https://localhost:8443/dashboard>. Depois de aceitar o cert
-auto-assinado, aparece um quadro de status com quatro linhas — uma por
-serviço — junto com os eventos recentes. Cada linha tem um botão:
+| Container          | Porta interna      | Observação                                     |
+| ------------------ | ------------------ | ---------------------------------------------- |
+| `gateway`          | `8443` (publicada) | Único ponto de entrada, serve loja + dashboard |
+| `users`            | `5001`             | Serviço de usuários (SQLite)                   |
+| `products-primary` | `5002`             | Réplica A do catálogo                          |
+| `products-replica` | `5012`             | Réplica B do catálogo                          |
+| `orders`           | `5003`             | Serviço de pedidos (SQLite)                    |
 
-* **Kill** — liga o kill switch daquele serviço. O serviço responde ao
-  toggle e em ~500 ms desliga sozinho. A política
-  `restart: unless-stopped` do Compose sobe ele de novo
-  automaticamente; o heartbeat detecta a queda e registra os eventos
-  `DOWN` e `RECOVERED`.
-* **Revive** — aparece bem brevemente entre o kill e o restart
-  automático. A maioria não chega a clicar, porque a recuperação é
-  mais rápida que o reflexo.
+## 4. Caso prefira não usar `make`
 
-A página chama `GET /administration/status` a cada dois segundos,
-então o indicador fica vermelho em ~5–10 segundos depois da queda e
-volta pra verde em ~5 segundos depois do container reiniciar.
-
-## 6. Fluxo de demo com curl
-
-A conta admin padrão é criada na primeira vez que o serviço de
-usuários sobe:
-
-```
-email:    admin@local
-senha:    admin123
-```
-
-Rode esses comandos em outro terminal com o sistema no ar. A flag
-`-k` no curl aceita o cert auto-assinado.
+Os comandos manuais equivalentes (mesmo efeito do `make`):
 
 ```bash
-# (1) Cadastrar um usuário comum.
-curl -k -X POST https://localhost:8443/api/users/register \
-     -H 'content-type: application/json' \
-     -d '{"name":"Alice","email":"alice@example.com","password":"hunter2"}'
+cp .env.example .env                    # equivale a 'make envfile'
+bash certs/generate.sh                  # equivale a 'make certs'
+docker compose up --build               # equivale a 'make up'
+docker compose down                     # equivale a 'make down'
+docker compose down -v                  # equivale a 'make clean'
+```
 
-# (2) Login como admin.
-ADMINISTRATOR_TOKEN=$(curl -ks -X POST https://localhost:8443/api/users/login \
+Útil em ambiente sem `make`, mas em UNIX e WSL `make` está sempre
+presente ou é trivial de instalar.
+
+## 5. Contas e produtos seedados
+
+Na primeira subida, o serviço de usuários cria automaticamente duas
+contas pra demonstração:
+
+| Login                      | Papel                          |
+| -------------------------- | ------------------------------ |
+| `admin@local` / `admin123` | admin (pode cadastrar produto) |
+| `user@local` / `user123`   | usuário comum (pode pedir)     |
+
+E o serviço de produtos popula o catálogo com 5 itens × 10 unidades
+cada (Barbeador, Caderno, Chave de fenda, Desodorante, Bandeirinha de
+São João). Suficiente pra fazer login, pedir e ver o estoque cair.
+
+Se quiser começar do zero: `make clean && make` — apaga volumes e
+re-seeda tudo na próxima subida.
+
+## 6. O frontend
+
+A loja em <https://localhost:8443/> tem três abas no topo:
+
+- **Loja** — quando logado, lista os produtos com quantidade e o botão
+  _Pedir_. Cada pedido chama dois endpoints: primeiro
+  `POST /products/{id}/decrement` (replicado nas duas réplicas) e
+  depois `POST /orders` (registra o pedido). A seção _Meus pedidos_
+  abaixo mostra o histórico do usuário logado.
+- **Dashboard dos serviços** — grade de status dos quatro serviços
+  monitorados. Cada linha tem um botão _Kill_ que aciona o kill switch
+  (`POST /admin/toggle`); o serviço sai e o `restart: unless-stopped`
+  do Compose recoloca ele no ar em segundos. O heartbeat detecta a
+  queda e registra `DOWN` / `RECOVERED` na lista de eventos.
+- **Estoque** — só visível pra admin. Form simples (nome + quantidade)
+  pra cadastrar produto, e tabela com o estoque atual.
+
+## 7. Fluxo de demo via curl (alternativa ao frontend)
+
+A mesma demonstração pelo terminal. A flag `-k` aceita o cert
+auto-assinado.
+
+```bash
+# (1) Login como admin
+ADMIN_TOKEN=$(curl -ks -X POST https://localhost:8443/api/users/login \
      -H 'content-type: application/json' \
      -d '{"email":"admin@local","password":"admin123"}' \
      | jq -r .token)
 
-# (3) Criar um produto (só admin pode).
-curl -k -X POST https://localhost:8443/api/products \
-     -H "authorization: Bearer $ADMINISTRATOR_TOKEN" \
-     -H 'content-type: application/json' \
-     -d '{"name":"Coffee","price":9.99,"description":"Arabica"}'
+# (2) Ver os produtos seedados
+curl -k https://localhost:8443/api/products | jq
 
-# (4) Conferir que as duas réplicas têm o produto.
+# (3) Cadastrar um produto novo (só admin)
+curl -k -X POST https://localhost:8443/api/products \
+     -H "authorization: Bearer $ADMIN_TOKEN" \
+     -H 'content-type: application/json' \
+     -d '{"name":"Café","price":9.99,"description":"Arabica","quantity":15}'
+
+# (4) Conferir que as duas réplicas têm o produto
 docker compose exec products-primary cat /data/products.json
 docker compose exec products-replica cat /data/products.json
 
-# (5) Login como Alice e fazer um pedido.
-ALICE_TOKEN=$(curl -ks -X POST https://localhost:8443/api/users/login \
+# (5) Login como usuário comum
+USER_TOKEN=$(curl -ks -X POST https://localhost:8443/api/users/login \
      -H 'content-type: application/json' \
-     -d '{"email":"alice@example.com","password":"hunter2"}' \
+     -d '{"email":"user@local","password":"user123"}' \
      | jq -r .token)
+USER_ID=$(curl -ks -X POST https://localhost:8443/api/users/login \
+     -H 'content-type: application/json' \
+     -d '{"email":"user@local","password":"user123"}' \
+     | jq -r .user.id)
 
+# (6) Fazer um pedido — front faz decrement + orders, então o curl
+#     também precisa fazer os dois pra refletir o mesmo fluxo
+curl -k -X POST https://localhost:8443/api/products/1/decrement \
+     -H "authorization: Bearer $USER_TOKEN"
 curl -k -X POST https://localhost:8443/api/orders \
-     -H "authorization: Bearer $ALICE_TOKEN" \
+     -H "authorization: Bearer $USER_TOKEN" \
      -H 'content-type: application/json' \
      -d '{"productId":1}'
 
-# (6) Listar os pedidos da Alice.
-ALICE_USER_ID=$(curl -ks -X POST https://localhost:8443/api/users/login \
-     -H 'content-type: application/json' \
-     -d '{"email":"alice@example.com","password":"hunter2"}' \
-     | jq -r .user.id)
-
-curl -k -H "authorization: Bearer $ALICE_TOKEN" \
-     "https://localhost:8443/api/orders/$ALICE_USER_ID"
+# (7) Listar os pedidos do usuário
+curl -k -H "authorization: Bearer $USER_TOKEN" \
+     "https://localhost:8443/api/orders/$USER_ID"
 ```
 
-Os caminhos negativos também funcionam:
+Caminhos negativos pra demonstrar a proteção JWT:
 
 ```bash
-# Usuário comum não pode criar produto: HTTP 403.
+# Usuário comum não pode criar produto: HTTP 403
 curl -k -i -X POST https://localhost:8443/api/products \
-     -H "authorization: Bearer $ALICE_TOKEN" \
+     -H "authorization: Bearer $USER_TOKEN" \
      -H 'content-type: application/json' \
-     -d '{"name":"Tea","price":4.5,"description":""}'
+     -d '{"name":"Tea","price":4.5,"quantity":5}'
 
-# Alice não pode ver os pedidos de outro usuário: HTTP 403.
-curl -k -i -H "authorization: Bearer $ALICE_TOKEN" \
+# Usuário não pode ver pedidos de outra pessoa: HTTP 403
+curl -k -i -H "authorization: Bearer $USER_TOKEN" \
      https://localhost:8443/api/orders/9999
 ```
 
-## 7. Simulando uma queda
+## 8. Simulando uma queda
 
 1. Abra o dashboard.
-2. Clique em **Kill** ao lado de `orders`.
+2. Clique **Kill** ao lado de `orders`.
 3. Em ~10 segundos o indicador fica vermelho e aparece a linha de
-   evento: `<timestamp>  orders  DOWN`.
+   evento `<timestamp>  orders  DOWN`.
 4. Enquanto o serviço tá fora, qualquer chamada em
-   `https://localhost:8443/api/orders` devolve **HTTP 503** — o gateway
-   curto-circuita a request porque o heartbeat marcou o serviço como
-   indisponível.
-5. Alguns segundos depois o container reinicia sozinho. O indicador
+   `https://localhost:8443/api/orders/...` devolve **HTTP 503** — o
+   gateway curto-circuita a request porque o heartbeat marcou o serviço
+   como indisponível.
+5. Alguns segundos depois o container reinicia sozinho, o indicador
    volta pra verde e um evento `RECOVERED` é adicionado.
 
-Pode repetir o experimento com qualquer dos quatro serviços. Matar o
+> A janela real em que dá pra ver o 503 é curta (uns 5–10 segundos)
+> porque o `restart: unless-stopped` levanta o container antes do
+> heartbeat reagir totalmente. Pra forçar uma queda longa e ver o 503
+> com calma: `docker compose stop orders` (sem `down`), espera uns 15
+> segundos, faz a request. Restaura com `docker compose start orders`.
+
+Repita o experimento com qualquer dos quatro serviços. Matar
 `products-primary` é particularmente interessante: as leituras
 continuam (porque o `products-replica` ainda atende), mas as escritas
-devolvem **HTTP 500** porque a consistência forte exige que as duas
+devolvem **HTTP 500** — a consistência forte exige que as duas
 réplicas confirmem.
 
-## 8. Rodando os testes
-
-A suíte de testes Go roda inteira dentro do Docker, então não precisa
-ter Go instalado:
+## 9. Testes
 
 ```bash
-docker run --rm -v "$PWD:/src" -w /src golang:1.22-alpine \
-    sh -c 'go mod tidy && go test ./...'
+make test
 ```
 
-Você deve ver saída verde nos pacotes `internal/authentication`,
+Roda `go test ./...` dentro da imagem `golang:1.22-alpine`. Não precisa
+de Go local. Saída esperada: verde em `internal/authentication`,
 `internal/httpjson`, `internal/killswitch`, `internal/users`,
 `internal/products`, `internal/orders` e `internal/gateway`.
 
-## 9. Layout do projeto
+## 10. Layout do projeto
 
 ```
 .
 ├── certs/              geração do certificado auto-assinado
 ├── cmd/
-│   ├── gateway/        entrypoint do gateway (main.go)
+│   ├── gateway/        entrypoint do gateway
 │   ├── users/          entrypoint do serviço de usuários
 │   ├── products/       entrypoint do serviço de produtos (usado 2x no compose)
 │   └── orders/         entrypoint do serviço de pedidos
@@ -257,28 +267,35 @@ Você deve ver saída verde nos pacotes `internal/authentication`,
 │   ├── users/          handlers e store SQLite do usuário
 │   ├── products/       handlers e store em JSON do produto
 │   ├── orders/         handlers e store SQLite do pedido
-│   └── gateway/        proxy, heartbeat, replica manager, dashboard
+│   └── gateway/
+│       ├── proxy.go, heartbeat.go, replica.go, server.go, dashboard.go, events.go
+│       └── web/        index.html (loja), estoque.html, dashboard.html
 ├── Dockerfile          imagem única usada por todos os serviços
 ├── docker-compose.yml  cinco containers, uma rede, quatro volumes
+├── Makefile            atalhos pra docker compose
+├── relatorio.pdf       relatório respondendo as 5 perguntas
 └── README_execucao.md  você está aqui
 ```
 
-## 10. O que olhar enquanto avalia
+## 11. O que olhar enquanto avalia
 
-* **Consistência forte:** `internal/gateway/replica.go` — o
+- **Consistência forte:** `internal/gateway/replica.go` —
   `HandleWrite` manda pra duas réplicas e só responde sucesso quando
   as duas devolvem 2xx.
-* **Heartbeat:** `internal/gateway/heartbeat.go` — poll de 5 segundos,
+- **Heartbeat:** `internal/gateway/heartbeat.go` — poll de 5 segundos,
   marca DOWN depois de duas falhas seguidas, marca RECOVERED no
   primeiro sucesso depois disso.
-* **JWT e proteção de admin:**
+- **JWT e proteção de admin:**
   `internal/authentication/authentication.go` (assinatura/verificação)
   e `internal/products/server.go` (grupo de rotas só pra admin).
-* **Hash de senha:** `HashPassword` / `VerifyPassword` em
+- **Hash de senha:** `HashPassword` / `VerifyPassword` em
   `internal/authentication/authentication.go`, usado em todos os
   pontos de entrada de `internal/users/handlers.go`.
+- **Frontend:** `internal/gateway/web/index.html`,
+  `internal/gateway/web/estoque.html`, embutidos no binário do gateway
+  via `//go:embed` em `internal/gateway/dashboard.go`.
 
-O **relatorio.pdf** que vem junto responde as cinco perguntas do
+O **`relatorio.pdf`** que vem junto responde as cinco perguntas do
 enunciado e discute os trade-offs (consistência forte vs. eventual,
 chave única de JWT compartilhada, `InsecureSkipVerify` nas chamadas
 internas etc.).
